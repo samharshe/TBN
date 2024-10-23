@@ -1,0 +1,7 @@
+wandb
+.DS_STORE
+__pycache__
+outputs
+data/dataset/*
+data/dataloader/*
+src/weights/*
