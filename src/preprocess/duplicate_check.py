@@ -1,11 +1,17 @@
 import pandas as pd
 import os
 
-for file in os.listdir('data/player/box_weighted_average'):
-    df = pd.read_csv(f'data/player/box_weighted_average/{file}')
-    # Check for duplicate rows
-    duplicate_rows = df[df.duplicated()]
-    
-    if not duplicate_rows.empty:
-        print(f"Duplicate rows found in {file}:")
-        print(duplicate_rows)
+dir_paths = ['data/player/box_raw',
+            'data/player/box_weighted_average',
+            'data/team/box_raw',
+            'data/team/box_weighted_average']
+for dir_path in dir_paths:
+    print(f'checking {dir_path} for duplicates')
+    for f in os.listdir(dir_path):
+        df = pd.read_csv(f'{dir_path}/{f}')
+        duplicate_dates = df[df.duplicated(subset=['DATE'], keep=False)]
+        
+        if not duplicate_dates.empty:
+            print(f"duplicates found: {f}")
+            print(duplicate_dates)
+    print(f'finished checking {dir_path} for duplicates')
