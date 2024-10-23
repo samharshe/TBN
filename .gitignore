@@ -1,5 +1,5 @@
 wandb
-.DS_STORE
+.DS_Store
 __pycache__
 outputs
 data/dataset/*
