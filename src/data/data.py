@@ -37,7 +37,7 @@ class GameDataset(Dataset):
             'team_y_version': team_y_version,
         }
         game_df = pd.read_csv('data/game/bbref_game_mini.csv')
-        game_df = game_df
+        game_df = game_df.head()
         team_player_dict = pickle.load(open('data/team_player_dict/team_player_dict.pkl', 'rb'))
         data = game_df.apply(self._row_to_game, axis=1, args=(dataset_versions,team_player_dict,))
         data = data.to_list()
@@ -97,10 +97,10 @@ class GameDataset(Dataset):
                     tensor = torch.tensor(df.values)
                     tensor_lists[f'team_{z}_tensor_list'].append(tensor)
                     
-            player_x_tensor = torch.stack(tensor_lists['player_x_tensor_list'])
-            player_y_tensor = torch.stack(tensor_lists['player_y_tensor_list'])
-            team_x_tensor = torch.stack(tensor_lists['team_x_tensor_list'])
-            team_y_tensor = torch.stack(tensor_lists['team_y_tensor_list'])
+            player_x_tensor = torch.stack(tensor_lists['player_x_tensor_list']).squeeze(dim=1)
+            player_y_tensor = torch.stack(tensor_lists['player_y_tensor_list']).squeeze(dim=1)
+            team_x_tensor = torch.stack(tensor_lists['team_x_tensor_list']).squeeze(dim=1)
+            team_y_tensor = torch.stack(tensor_lists['team_y_tensor_list']).squeeze(dim=1)
                 
             x = {
                 'players': player_x_tensor,
@@ -240,7 +240,7 @@ def get_engineered_dataloaders(name: str,
                     batch_size: int=32) -> Tuple[DataLoader, DataLoader, DataLoader]:
     try:
         dataset = GameDataset(name=name)
-        dataset = [(reshape_x(data.x[x_version].float()), data.y[y_version].float().view(-1)) for data in dataset]
+        dataset = [(data.x[x_version].float(), data.y[y_version].float()) for data in dataset]
         dataset = normalize_dataset(dataset)
         dataset = engineer_dataset(dataset)
     except:
