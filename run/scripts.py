@@ -227,7 +227,8 @@ def train(model: Module,
         # add epoch losses to training_losses
         train_losses += train_epoch_losses
     
-    plt.figure()  # Create a new figure
+    # plot training loss
+    plt.figure()  
     plt.plot(train_losses)
     plt.xlabel('batch #')
     plt.ylabel('loss')
@@ -259,7 +260,7 @@ def check_memory(model: Module, dataloader: DataLoader, optimizer: Optimizer=tor
         
         # predictions from the model
         y_hat = model(x)
-
+        
         # loss using passed loss function
         loss = loss_fn(y_hat, y)
         

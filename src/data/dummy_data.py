@@ -150,7 +150,7 @@ def custom_collate(batch):
         padded_inp = torch.cat([inp, padding], dim=0)
         padded_inputs.append(padded_inp)
     
-    # Stack padded inputs and targets
+    # stack padded inputs and targets
     padded_inputs = torch.stack(padded_inputs)
     targets = torch.stack(targets)
     
