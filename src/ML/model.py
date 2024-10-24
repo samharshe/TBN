@@ -12,13 +12,14 @@ def gaussian_expansion(x, min, max, out_features):
     if out_features == 1:
         return x
     
+    # tensors for simple broadcasting
     centers = torch.linspace(min, max, out_features)
     sigma = (max - min) / out_features
     
     # keep from weird errors with improper broadcasting
     assert x.shape[-1] == 1, 'x must be 1-dimensional'
     
-    # all in one go...no reason to break up steps
+    # all in one go
     gaussian_expansion_tensor = (torch.exp((-0.5)*((x - centers) / sigma)**2)) / (sigma * torch.sqrt(torch.tensor(2*torch.pi))) 
     
     # return tensor
@@ -109,7 +110,6 @@ class SimpleTeamModel(nn.Module):
         self.prediction = nn.Linear(d_mod, 1)
         
     def forward(self, in_tensor):
-        # embedding block
         x = self.embedding(in_tensor)
         x = self.act(x)
         x = self.linear_1(x) + x
@@ -336,3 +336,48 @@ class EvenMoreGradualPlayerModel(nn.Module):
         out_tensor = self.prediction(out_tensor)
         return out_tensor
         
+class MeanSecondDim(nn.Module):
+    def __init__(self):
+        super().__init__()
+    
+    def forward(self, in_tensor):
+        return torch.mean(in_tensor, dim=2, keepdim=False)
+
+class MeanFirstDim(nn.Module):
+    def __init__(self):
+        super().__init__()
+    
+    def forward(self, in_tensor):
+        return torch.mean(in_tensor, dim=1, keepdim=False)
+
+class SumFirstDim(nn.Module):
+    def __init__(self):
+        super().__init__()
+    
+    def forward(self, in_tensor):
+        return torch.sum(in_tensor, dim=1, keepdim=False)
+
+class PlayerPointsModel(nn.Module):
+    def __init__(self, d_in, d_mod):
+        super().__init__()
+        self.d_in, self.d_mod = d_in, d_mod
+        self.act = nn.ReLU()
+        
+        self.embedding = nn.Sequential(
+            MultiHeadWrapper(d_mod=self.d_in, n_heads=1),
+            self.act,
+            nn.LayerNorm(normalized_shape=self.d_in),
+            nn.Linear(in_features=d_in, out_features=d_mod),
+            self.act,
+            nn.LayerNorm(normalized_shape=self.d_mod)
+        )
+        
+        self.prediction = nn.Linear(in_features=d_mod, out_features=1)
+        self.remove_feature_dim = MeanSecondDim()
+    
+    def forward(self, in_tensor):
+        out_tensor = self.embedding(in_tensor)
+        out_tensor = self.prediction(out_tensor)
+        out_tensor = self.remove_feature_dim(out_tensor)
+
+        return out_tensor

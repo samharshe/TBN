@@ -37,10 +37,15 @@ class GameDataset(Dataset):
             'team_x_version': team_x_version,
             'team_y_version': team_y_version,
         }
-        data = torch.load('data/dataset/elephant_2001-02.pt')
+        data = []
+        year_strings = [f'20{year-1:02d}-{year:02d}' for year in range(2,13)]
+        print(year_strings)
+        for year_string in year_strings:
+            path_to_load = f'data/dataset/elephant_{year_string}.pt'
+            data += torch.load(path_to_load)
         game_df = pd.read_csv('data/game/bbref_game.csv')
-        game_df = game_df[~game_df['SEASON'].isin(['2000-01', '2001-02'])]
-        team_player_dict = pickle.load(open('data/team_player_dict/team_player_dict.pkl', 'rb'))
+        game_df = game_df[~game_df['SEASON'].isin(['2000-01'] + year_strings)]
+        team_player_dict = pickle.load(open('data/team_player_dict/team_player_dict 2.pkl', 'rb'))
         for season in game_df['SEASON'].unique():
             season_df = game_df[game_df['SEASON'] == season]
             season_data = season_df.apply(self._row_to_game, axis=1, args=(dataset_versions,team_player_dict,)).to_list()

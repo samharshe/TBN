@@ -134,15 +134,40 @@ class GameDataset(Dataset):
     def __getitem__(self, index: int) -> Game:
         return self.data[index]
     
-def custom_collate(batch):
-    # Separate inputs and targets
+def fiesta_collate(batch):
+    # separate inputs and targets
     inputs = [item[0] for item in batch]
     targets = [item[1] for item in batch]
     
-    # Find the maximum number of players
+    # find the maximum number of players
     max_players = max(inp.shape[0] for inp in inputs)
     
-    # Pad inputs
+    # pad inputs
+    padded_inputs, padded_targets = [], []
+    for inp, target in zip(inputs, targets):
+        n_players, emb_dim = inp.shape
+        inp_padding = torch.zeros(max_players - n_players, emb_dim)
+        target_padding = torch.zeros(max_players - n_players, 1)
+        padded_inp = torch.cat([inp, inp_padding], dim=0)
+        padded_inputs.append(padded_inp)
+        padded_target = torch.cat([target, target_padding], dim=0)
+        padded_targets.append(padded_target)
+    
+    # stack padded inputs and targets
+    padded_inputs = torch.stack(padded_inputs)
+    padded_targets = torch.stack(padded_targets)
+    
+    return padded_inputs, padded_targets
+
+def custom_collate(batch):
+    # separate inputs and targets
+    inputs = [item[0] for item in batch]
+    targets = [item[1] for item in batch]
+    
+    # find the maximum number of players
+    max_players = max(inp.shape[0] for inp in inputs)
+    
+    # pad inputs
     padded_inputs = []
     for inp in inputs:
         n_players, emb_dim = inp.shape
@@ -264,3 +289,64 @@ def get_engineered_dataloaders(name: str,
     test_dataloader = DataLoader(dataset, batch_size=batch_size, sampler=test_sampler, collate_fn=custom_collate)
 
     return train_dataloader, val_dataloader, test_dataloader
+
+def get_fiesta_dataloaders(name: str,
+                    train_split: float=0.8, 
+                    val_split: float=0.1, 
+                    test_split: float=0.1, 
+                    batch_size: int=32):
+    try:
+        dataset = GameDataset(name='cactus_flower')
+        dataset = [(reshape_x(data.x['players'].float()), data.y['players'].float()[:,:,21]) for data in dataset] # x: [player x 40], y: [player x 1]
+        dataset = fiesta_normalize_dataset(dataset) # x: [player x 40], y: [player x 1]
+        dataset = engineer_dataset(dataset) # x: [player x 65], y: [player x 1]
+    except:
+        raise ValueError(f'dataset {name} not found. please build dataset before loading datalaoders on it.')
+    
+    total_size = len(dataset)
+    indices = list(range(total_size))
+    random.shuffle(indices)
+
+    train_size = int(total_size * train_split)
+    val_size = int(total_size * val_split)
+    test_size = total_size - train_size - val_size
+
+    train_indices, val_indices, test_indices = indices[:train_size], indices[train_size:train_size+val_size], indices[train_size+val_size:]
+
+    train_sampler = SubsetRandomSampler(train_indices)
+    valid_sampler = SubsetRandomSampler(val_indices)
+    test_sampler = SubsetRandomSampler(test_indices)
+
+    train_dataloader = DataLoader(dataset, batch_size=batch_size, sampler=train_sampler, collate_fn=fiesta_collate)
+    val_dataloader = DataLoader(dataset, batch_size=batch_size, sampler=valid_sampler, collate_fn=fiesta_collate)
+    test_dataloader = DataLoader(dataset, batch_size=batch_size, sampler=test_sampler, collate_fn=fiesta_collate)
+
+    return train_dataloader, val_dataloader, test_dataloader
+
+def get_fiesta_list():
+
+    return dataset
+
+def fiesta_normalize_dataset(dataset):
+    all_first_items = torch.cat([item[0] for item in dataset], dim=0)
+    all_second_items = torch.cat([item[1] for item in dataset], dim=0)
+    
+    # Calculate max values across the entire dataset
+    max_first_values, _ = torch.max(torch.abs(all_first_items), dim=0)
+    max_second_values, _ = torch.max(torch.abs(all_second_items), dim=0)
+    
+    # Normalize all first items by dividing by the max
+    normalized_first_items = all_first_items / (max_first_values + 1e-8)  # add small epsilon to avoid division by zero
+    normalized_second_items = all_second_items / (max_second_values + 1e-8)  # add small epsilon to avoid division by zero
+    
+    normalized_list = []
+    start_idx = 0
+    for idx, item in enumerate(dataset):
+        n_players = item[0].shape[0]
+        end_idx = start_idx + n_players
+        normalized_game = normalized_first_items[start_idx:end_idx]
+        normalized_result = normalized_second_items[start_idx:end_idx]
+        normalized_list.append((normalized_game, normalized_result))
+        start_idx = end_idx
+    
+    return normalized_list

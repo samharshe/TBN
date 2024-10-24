@@ -243,7 +243,7 @@ def check_memory(model: Module, dataloader: DataLoader, optimizer: Optimizer=tor
     # make single mini batch
     x, y = next(iter(dataloader))
     x = x[0:batch_size]
-    y = y[0:batch_size]
+    y = y[0:batch_size].squeeze(dim=2)
     
     wandb.init(project='TBN-memorize')
     wandb.watch(model, log="all", log_freq=2, log_graph=True)
