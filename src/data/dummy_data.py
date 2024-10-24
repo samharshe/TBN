@@ -4,7 +4,6 @@ from torch.utils.data import DataLoader, Dataset, SubsetRandomSampler
 import pandas as pd
 from torch import Tensor
 from src.ml.model import gaussian_expansion
-from IPython.display import clear_output
 
 class Game():
     def __init__(self, x: Dict[str, Tensor], y: Dict[str, Tensor], metadata: Dict[str, Any]):
@@ -26,28 +25,21 @@ class GameDataset(Dataset):
         else:
             if None in [player_x_version, player_y_version, team_x_version, team_y_version]:
                 raise TypeError(f'no dataset named {name} found and at least 1 data version not specified.')
-            data = self._create_dataset(player_x_version=player_x_version, player_y_version=player_y_version, team_x_version=team_x_version, team_y_version=team_y_version, name=name)
-            torch.save(data, processed_dataset_path)
+            data = self._create_dataset(player_x_version=player_x_version, player_y_version=player_y_version, team_x_version=team_x_version, team_y_version=team_y_version)
             return data
     
-    def _create_dataset(self, player_x_version: str, player_y_version: str, team_x_version: str, team_y_version: str, name: str) -> List[Game]:
+    def _create_dataset(self, player_x_version: str, player_y_version: str, team_x_version: str, team_y_version: str) -> List[Game]:
         dataset_versions = {
             'player_x_version': player_x_version,
             'player_y_version': player_y_version,
             'team_x_version': team_x_version,
             'team_y_version': team_y_version,
         }
-        data = torch.load('data/dataset/elephant_2001-02.pt')
-        game_df = pd.read_csv('data/game/bbref_game.csv')
-        game_df = game_df[~game_df['SEASON'].isin(['2000-01', '2001-02'])]
-        team_player_dict = pickle.load(open('data/team_player_dict/team_player_dict.pkl', 'rb'))
-        for season in game_df['SEASON'].unique():
-            season_df = game_df[game_df['SEASON'] == season]
-            season_data = season_df.apply(self._row_to_game, axis=1, args=(dataset_versions,team_player_dict,)).to_list()
-            season_file = f'data/dataset/{name}_{season}.pt'
-            torch.save(season_data, season_file)
-            print(f'saved {season} season data to {season_file}')
-            data.extend(season_data)
+        game_df = pd.read_csv('data/game/bbref_game_mini.csv')
+        game_df = game_df.head()
+        team_player_dict = pickle.load(open('src/data/team_player_dict.pkl', 'rb'))
+        data = game_df.apply(self._row_to_game, axis=1, args=(dataset_versions,team_player_dict,))
+        data = data.to_list()
         
         return data
         
@@ -59,10 +51,6 @@ class GameDataset(Dataset):
             season = row['SEASON']
             
             teams = [home, away]
-            
-            # clear any previous print output
-            clear_output()
-            print(f'beginning processing of {home} vs. {away} on {date}')
             
             home_players = team_player_dict[home][date]
             away_players = team_player_dict[away][date]
@@ -133,6 +121,8 @@ class GameDataset(Dataset):
                 'home_players': home_players,
                 'away_players': away_players
             }
+            
+            print(f'processed {home} vs. {away} on {date}')
             
             game = Game(x=x, y=y, metadata=metadata)
             
@@ -249,7 +239,7 @@ def get_engineered_dataloaders(name: str,
                     batch_size: int=32) -> Tuple[DataLoader, DataLoader, DataLoader]:
     try:
         dataset = GameDataset(name=name)
-        dataset = [(data.x[x_version].float(), data.y[y_version].float()) for data in dataset]
+        dataset = [(reshape_x(data.x[x_version].float()), data.y[y_version].float()) for data in dataset]
         dataset = normalize_dataset(dataset)
         dataset = engineer_dataset(dataset)
     except:
