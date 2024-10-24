@@ -245,10 +245,6 @@ def check_memory(model: Module, dataloader: DataLoader, optimizer: Optimizer=tor
     x = x[0:batch_size]
     y = y[0:batch_size].squeeze(dim=2)
     
-    wandb.init(project='TBN-memorize')
-    wandb.watch(model, log="all", log_freq=2, log_graph=True)
-    wandb.log({"batch_size": batch_size})
-    
     # track gradients
     model.train()
     # track training losses
@@ -273,14 +269,8 @@ def check_memory(model: Module, dataloader: DataLoader, optimizer: Optimizer=tor
         # keep track of training losses
         train_losses.append(loss.item())
         
-        # log training loss
-        wandb.log({"train_loss": loss.item()})
-        
-    # write gradient and weights and biases stats; quicker than wandb and works offline
+    # write gradient and weights and biases stats
     write_stats(model)
-    
-    # end wandb run
-    wandb.finish()
     
     # print final prediction
     print(f'final prediction: model(x)')

@@ -38,7 +38,7 @@ class GameDataset(Dataset):
             'team_y_version': team_y_version,
         }
         data = []
-        year_strings = [f'20{year-1:02d}-{year:02d}' for year in range(2,13)]
+        year_strings = [f'20{year-1:02d}-{year:02d}' for year in range(2,22)]
         print(year_strings)
         for year_string in year_strings:
             path_to_load = f'data/dataset/elephant_{year_string}.pt'
@@ -84,16 +84,20 @@ class GameDataset(Dataset):
             for z in ['x', 'y']:
                 player_version = dataset_versions[f'player_{z}_version']
                 for player in players:
-                    df = pd.read_csv(f'data/player/{player_version}/{player}.csv')
-                    df = df[df['DATE'] == date]
-                    if z == 'x':
-                        if player in home_players:
-                            df['HOME'] = 1
-                        else:
-                            df['HOME'] = -1
-                    df = df.drop(columns=['TEAM', 'SEASON', 'DATE', 'OPPONENT', 'HOME_TEAM'])
-                    tensor = torch.tensor(df.values)
-                    tensor_lists[f'player_{z}_tensor_list'].append(tensor)
+                    if player == '.DS_S':
+                        with open('flag.txt', 'a') as flag_file:
+                            flag_file.write(f'bug found for {home} v. {away} on {date}\n')
+                    else:
+                        df = pd.read_csv(f'data/player/{player_version}/{player}.csv')
+                        df = df[df['DATE'] == date]
+                        if z == 'x':
+                            if player in home_players:
+                                df['HOME'] = 1
+                            else:
+                                df['HOME'] = -1
+                        df = df.drop(columns=['TEAM', 'SEASON', 'DATE', 'OPPONENT', 'HOME_TEAM'])
+                        tensor = torch.tensor(df.values)
+                        tensor_lists[f'player_{z}_tensor_list'].append(tensor)
 
                 team_version = dataset_versions[f'team_{z}_version']
                 for team in teams:
