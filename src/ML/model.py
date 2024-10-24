@@ -2,29 +2,10 @@ import torch
 from torch import nn
 
 def get_home_away_tensors(in_tensor, original_tensor):
-    home_mask = original_tensor[:,:,-1]==1
-    batch_num_home_players = home_mask.sum(dim=1)
-    batch_max_home_players = torch.max(batch_num_home_players)
-    home_tensor = torch.zeros(in_tensor.size(0), batch_max_home_players, in_tensor.size(2))
-    flattened_in_tensor = in_tensor.view(-1, in_tensor.size(2))
-    flattened_home_mask = home_mask.view(-1)
-    filtered_rows = flattened_in_tensor[flattened_home_mask]
-    batch_offsets = torch.arange(in_tensor.size(0)).repeat_interleave(batch_num_home_players)
-    row_offsets = torch.cat([torch.arange(nv) for nv in batch_num_home_players])
-    home_tensor[batch_offsets, row_offsets] = filtered_rows
-    
-    away_mask = original_tensor[:,:,-1]==1
-    batch_num_away_players = away_mask.sum(dim=1)
-    batch_max_away_players = torch.max(batch_num_away_players)
-    away_tensor = torch.zeros(in_tensor.size(0), batch_max_away_players, in_tensor.size(2))
-    flattened_in_tensor = in_tensor.view(-1, in_tensor.size(2))
-    flattened_away_mask = away_mask.view(-1)
-    filtered_rows = flattened_in_tensor[flattened_away_mask]
-    batch_offsets = torch.arange(in_tensor.size(0)).repeat_interleave(batch_num_away_players)
-    row_offsets = torch.cat([torch.arange(nv) for nv in batch_num_away_players])
-    away_tensor[batch_offsets, row_offsets] = filtered_rows
-    
-    return home_tensor, away_tensor
+    home_zero_tensor, away_zero_tensor = torch.zeros_like(in_tensor), torch.zeros_like(in_tensor)
+    home_mask, away_mask = (original_tensor[:, :, -1] == 1), (original_tensor[:, :, -1] == -1)
+    home_zero_tensor[home_mask], away_zero_tensor[away_mask] = in_tensor[home_mask], in_tensor[away_mask]
+    return home_zero_tensor, away_zero_tensor
 
 def gaussian_expansion(x, min, max, out_features):
     # for simpler syntax elsewhere
