@@ -21,8 +21,9 @@ def train_test(model: Module,
     name = cfg_dict['name']
     y_version = cfg_dict['y_version']
     
-    wandb.init(project='TBN', config=cfg_dict, mode='offline')
-    wandb.watch(model, log="all", log_freq=10)
+    wandb.init(project='TBN')
+    wandb.config.update(cfg_dict)
+    wandb.watch(model, log="all", log_freq=50, log_graph=True)
     try:
         train(model=model, optimizer=optimizer, scheduler=scheduler, loss_fn=loss_fn, train_dataloader=train_dataloader, val_dataloader=val_dataloader, n_epochs=n_epochs, name=name)
         if y_version == 'score':
@@ -243,6 +244,10 @@ def check_memory(model: Module, dataloader: DataLoader, optimizer: Optimizer=tor
     x = x[0:batch_size]
     y = y[0:batch_size]
     
+    wandb.init(project='TBN-memorize')
+    wandb.watch(model, log="all", log_freq=2, log_graph=True)
+    wandb.log({"batch_size": batch_size})
+    
     # track gradients
     model.train()
     # track training losses
@@ -267,20 +272,15 @@ def check_memory(model: Module, dataloader: DataLoader, optimizer: Optimizer=tor
         # keep track of training losses
         train_losses.append(loss.item())
         
-    # write gradient stats
-    with open('gradients.txt', 'w') as f:
-        f.write(f"total number of model parameters: {sum(p.numel() for p in model.parameters())}\n" + '-'*60)
-        for name, param in model.named_parameters():
-            if param.requires_grad and param.grad is not None:
-                grad = param.grad
-                f.write(f"\n{name} | shape: {param.shape}\n")
-                f.write(f"gradient stats:\n")
-                f.write(f"  norm: {grad.norm():.4f}\n")
-                f.write(f"  mean: {grad.mean():.4f}\n")
-                f.write(f"  std: {grad.std():.4f}\n")
-                f.write(f"  % zeros: {(grad == 0).float().mean()*100:.1f}%\n")
-                f.write(f"  % inf/nan: {(~torch.isfinite(grad)).float().mean()*100:.1f}%\n")
+        # log training loss
+        wandb.log({"train_loss": loss.item()})
         
+    # write gradient and weights and biases stats; quicker than wandb and works offline
+    write_stats(model)
+    
+    # end wandb run
+    wandb.finish()
+    
     # print final prediction
     print(f'final prediction: model(x)')
     print([val for val in y_hat.tolist()])
@@ -294,3 +294,30 @@ def check_memory(model: Module, dataloader: DataLoader, optimizer: Optimizer=tor
     plt.ylabel('loss')
     plt.title('training loss')
     plt.show()
+    
+def write_stats(model: Module) -> None:
+    # write gradient stats
+    with open('memorize/gradients.txt', 'w') as f:
+        f.write(f"total number of model parameters: {sum(p.numel() for p in model.parameters())}\n" + '-'*60)
+        for name, param in model.named_parameters():
+            if param.requires_grad and param.grad is not None:
+                grad = param.grad
+                f.write(f"\n{name} | shape: {param.shape}\n")
+                f.write(f"gradient stats:\n")
+                f.write(f"  norm: {grad.norm():.4f}\n")
+                f.write(f"  mean: {grad.mean():.4f}\n")
+                f.write(f"  std: {grad.std():.4f}\n")
+                f.write(f"  % zeros: {(grad == 0).float().mean()*100:.1f}%\n")
+                f.write(f"  % inf/nan: {(~torch.isfinite(grad)).float().mean()*100:.1f}%\n")
+
+    # analyze weight and bias distributions
+    with open('memorize/weights_and_biases.txt', 'w') as f:
+        f.write("weight and bias distributions\n" + '-'*60)
+        for name, param in model.named_parameters():
+            if 'weight' in name or 'bias' in name:
+                f.write(f"\n{name} | shape: {param.shape}\n")
+                f.write(f"  mean: {param.mean().item():.4f}\n")
+                f.write(f"  std: {param.std().item():.4f}\n")
+                f.write(f"  min: {param.min().item():.4f}\n")
+                f.write(f"  max: {param.max().item():.4f}\n")
+                f.write(f"  % zeros: {(param == 0).float().mean()*100:.1f}%\n")
