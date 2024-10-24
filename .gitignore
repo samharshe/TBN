@@ -5,3 +5,4 @@ outputs
 data/dataset/*
 data/dataloader/*
 src/weights/*
+memorize/*
