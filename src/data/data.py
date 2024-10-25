@@ -256,30 +256,36 @@ def get_engineered_dataloaders(name: str,
                     val_split: float=0.1, 
                     test_split: float=0.1, 
                     batch_size: int=32) -> Tuple[DataLoader, DataLoader, DataLoader]:
-    try:
-        dataset = GameDataset(name=name)
-        dataset = [(data.x[x_version].float(), data.y[y_version].float()) for data in dataset]
-        dataset = normalize_dataset(dataset)
-        dataset = engineer_dataset(dataset)
-    except:
-        raise ValueError(f'dataset {name} not found. please build dataset before loading datalaoders on it.')
-    
-    total_size = len(dataset)
-    indices = list(range(total_size))
-    random.shuffle(indices)
+    print('hi')
+    dataloaders_path = f'data/dataloader/{name}_{x_version}_{y_version}_{train_split}_{val_split}_{test_split}_{batch_size}.pt'
+    if os.path.exists(dataloaders_path):
+        return torch.load(dataloaders_path)
+    else:
+        try:
+            dataset = GameDataset(name=name)
+            dataset = [(data.x[x_version].float(), data.y[y_version].float()) for data in dataset]
+            dataset = normalize_dataset(dataset)
+            dataset = engineer_dataset(dataset)
+        except:
+            raise ValueError(f'dataset {name} not found. please build dataset before loading datalaoders on it.')
+        
+        total_size = len(dataset)
+        indices = list(range(total_size))
+        random.shuffle(indices)
 
-    train_size = int(total_size * train_split)
-    val_size = int(total_size * val_split)
-    test_size = total_size - train_size - val_size
+        train_size = int(total_size * train_split)
+        val_size = int(total_size * val_split)
+        test_size = total_size - train_size - val_size
 
-    train_indices, val_indices, test_indices = indices[:train_size], indices[train_size:train_size+val_size], indices[train_size+val_size:]
+        train_indices, val_indices, test_indices = indices[:train_size], indices[train_size:train_size+val_size], indices[train_size+val_size:]
 
-    train_sampler = SubsetRandomSampler(train_indices)
-    valid_sampler = SubsetRandomSampler(val_indices)
-    test_sampler = SubsetRandomSampler(test_indices)
+        train_sampler = SubsetRandomSampler(train_indices)
+        valid_sampler = SubsetRandomSampler(val_indices)
+        test_sampler = SubsetRandomSampler(test_indices)
 
-    train_dataloader = DataLoader(dataset, batch_size=batch_size, sampler=train_sampler, collate_fn=custom_collate)
-    val_dataloader = DataLoader(dataset, batch_size=batch_size, sampler=valid_sampler, collate_fn=custom_collate)
-    test_dataloader = DataLoader(dataset, batch_size=batch_size, sampler=test_sampler, collate_fn=custom_collate)
+        train_dataloader = DataLoader(dataset, batch_size=batch_size, sampler=train_sampler, collate_fn=custom_collate)
+        val_dataloader = DataLoader(dataset, batch_size=batch_size, sampler=valid_sampler, collate_fn=custom_collate)
+        test_dataloader = DataLoader(dataset, batch_size=batch_size, sampler=test_sampler, collate_fn=custom_collate)
 
-    return train_dataloader, val_dataloader, test_dataloader
+        torch.save((train_dataloader, val_dataloader, test_dataloader), dataloaders_path)
+        return train_dataloader, val_dataloader, test_dataloader

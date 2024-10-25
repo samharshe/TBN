@@ -356,28 +356,39 @@ class SumFirstDim(nn.Module):
     
     def forward(self, in_tensor):
         return torch.sum(in_tensor, dim=1, keepdim=False)
-
-class PlayerPointsModel(nn.Module):
-    def __init__(self, d_in, d_mod):
+    
+class MckinneyPlayerModel(nn.Module):
+    def __init__(self, d_in, d_mod, d_out):
         super().__init__()
-        self.d_in, self.d_mod = d_in, d_mod
+        self.d_in, self.d_mod, self.d_out = d_in, d_mod, d_out
         self.act = nn.ReLU()
-        
+        self.dropout_p = 0.0
+
         self.embedding = nn.Sequential(
-            MultiHeadWrapper(d_mod=self.d_in, n_heads=1),
+            MultiHeadWrapper(d_mod=self.d_in, n_heads=5),
             self.act,
             nn.LayerNorm(normalized_shape=self.d_in),
-            nn.Linear(in_features=d_in, out_features=d_mod),
+            LinearWithDropout(in_features=self.d_in, out_features=self.d_mod, dropout_p=self.dropout_p),
+            self.act,
+            nn.LayerNorm(self.d_mod)
+        )
+
+        self.body = nn.Sequential(
+            MultiHeadWrapper(d_mod=self.d_mod, n_heads=4),
+            self.act,
+            nn.LayerNorm(normalized_shape=self.d_mod),
+            ResidualLinearWithDropout(d_mod=self.d_mod, dropout_p=self.dropout_p),
             self.act,
             nn.LayerNorm(normalized_shape=self.d_mod)
         )
-        
-        self.prediction = nn.Linear(in_features=d_mod, out_features=1)
-        self.remove_feature_dim = MeanSecondDim()
+
+        self.pred = nn.Sequential(
+            MeanFirstDim(),
+            LinearWithDropout(in_features=self.d_mod, out_features=self.d_out, dropout_p=self.dropout_p)
+        )
     
     def forward(self, in_tensor):
         out_tensor = self.embedding(in_tensor)
-        out_tensor = self.prediction(out_tensor)
-        out_tensor = self.remove_feature_dim(out_tensor)
-
+        out_tensor = self.body(out_tensor)
+        out_tensor = self.pred(out_tensor)
         return out_tensor
