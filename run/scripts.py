@@ -21,7 +21,7 @@ def train_test(model: Module,
     name = cfg_dict['name']
     y_version = cfg_dict['y_version']
     
-    wandb.init(project='TBN', mode='offline')
+    wandb.init(project='TBN')
     wandb.config.update(cfg_dict)
     wandb.watch(model, log="all", log_freq=50, log_graph=True)
     try:

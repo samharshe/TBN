@@ -128,9 +128,9 @@ class SimplePlayerModel(nn.Module):
         super().__init__()
         self.act = nn.LeakyReLU()
         
-        self.embedding = LinearWithLayerNorm(in_features=d_in, out_features=d_mod)
+        self.embedding = LinearWithLayerNormAndDropout(in_features=d_in, out_features=d_mod)
         
-        self.post_embedding = ResidualLinearWithLayerNorm(d_mod=d_mod)
+        self.post_embedding = ResidualLinearWithLayerNormAndDropout(d_mod=d_mod)
         
         self.attention_blocks = nn.ModuleList([
             CompleteAttentionWithLayerNorm(d_mod=d_mod, n_heads=4),
@@ -138,16 +138,16 @@ class SimplePlayerModel(nn.Module):
         ])
         
         self.player_blocks = nn.ModuleList([
-            ResidualLinearWithLayerNorm(d_mod=d_mod),
-            ResidualLinearWithLayerNorm(d_mod=d_mod),
+            ResidualLinearWithLayerNormAndDropout(d_mod=d_mod),
+            ResidualLinearWithLayerNormAndDropout(d_mod=d_mod),
         ])
         
         self.team_blocks = nn.ModuleList([
-            ResidualLinearWithLayerNorm(d_mod=d_mod*2),
-            ResidualLinearWithLayerNorm(d_mod=d_mod*2),
+            ResidualLinearWithLayerNormAndDropout(d_mod=d_mod*2),
+            ResidualLinearWithLayerNormAndDropout(d_mod=d_mod*2),
         ])
         
-        self.pre_prediction = LinearWithLayerNorm(in_features=d_mod*2, out_features=d_mod)
+        self.pre_prediction = LinearWithLayerNormAndDropout(in_features=d_mod*2, out_features=d_mod)
         self.layer_norm = nn.LayerNorm(normalized_shape=d_mod)
         self.prediction = nn.Linear(in_features=d_mod, out_features=1)
     
@@ -183,9 +183,9 @@ class ScorePlayerModel(nn.Module):
         super().__init__()
         self.act = nn.LeakyReLU()
         
-        self.embedding = LinearWithLayerNorm(in_features=d_in, out_features=d_mod)
+        self.embedding = LinearWithLayerNormAndDropout(in_features=d_in, out_features=d_mod)
         
-        self.post_embedding = ResidualLinearWithLayerNorm(d_mod=d_mod)
+        self.post_embedding = ResidualLinearWithLayerNormAndDropout(d_mod=d_mod)
         
         self.attention_blocks = nn.ModuleList([
             CompleteAttentionWithLayerNorm(d_mod=d_mod, n_heads=4),
@@ -193,16 +193,16 @@ class ScorePlayerModel(nn.Module):
         ])
         
         self.player_blocks = nn.ModuleList([
-            ResidualLinearWithLayerNorm(d_mod=d_mod),
-            ResidualLinearWithLayerNorm(d_mod=d_mod),
+            ResidualLinearWithLayerNormAndDropout(d_mod=d_mod),
+            ResidualLinearWithLayerNormAndDropout(d_mod=d_mod),
         ])
         
         self.team_blocks = nn.ModuleList([
-            ResidualLinearWithLayerNorm(d_mod=d_mod*2),
-            ResidualLinearWithLayerNorm(d_mod=d_mod*2),
+            ResidualLinearWithLayerNormAndDropout(d_mod=d_mod*2),
+            ResidualLinearWithLayerNormAndDropout(d_mod=d_mod*2),
         ])
         
-        self.pre_prediction = LinearWithLayerNorm(in_features=d_mod*2, out_features=d_mod)
+        self.pre_prediction = LinearWithLayerNormAndDropout(in_features=d_mod*2, out_features=d_mod)
         self.layer_norm = nn.LayerNorm(normalized_shape=d_mod)
         self.prediction = nn.Linear(in_features=d_mod, out_features=2)
     
@@ -390,5 +390,48 @@ class MckinneyPlayerModel(nn.Module):
     def forward(self, in_tensor):
         out_tensor = self.embedding(in_tensor)
         out_tensor = self.body(out_tensor)
+        out_tensor = self.pred(out_tensor)
+        return out_tensor
+    
+class EpochPlayerModel(nn.Module):
+    def __init__(self, d_in, d_mod, d_out):
+        super().__init__()
+        self.d_in, self.d_mod, self.d_out = d_in, d_mod, d_out
+        self.act = nn.ReLU()
+        self.dropout_p = 0.2
+
+        self.embedding = nn.Sequential(
+            MultiHeadWrapper(d_mod=self.d_in, n_heads=5),
+            self.act,
+            nn.LayerNorm(normalized_shape=self.d_in),
+            LinearWithDropout(in_features=self.d_in, out_features=self.d_mod, dropout_p=self.dropout_p),
+            self.act,
+            nn.LayerNorm(self.d_mod)
+        )
+
+        self.player_body = nn.Sequential(
+            MultiHeadWrapper(d_mod=self.d_mod, n_heads=4),
+            self.act,
+            nn.LayerNorm(normalized_shape=self.d_mod),
+            ResidualLinearWithDropout(d_mod=self.d_mod, dropout_p=self.dropout_p),
+            self.act,
+            nn.LayerNorm(normalized_shape=self.d_mod),
+            MeanFirstDim(),
+        )
+
+        self.team_body = nn.Sequential(
+            ResidualLinearWithDropout(d_mod=self.d_mod, dropout_p=self.dropout_p),
+            self.act,
+            nn.LayerNorm(normalized_shape=self.d_mod)
+        )
+
+        self.pred = nn.Sequential(
+            LinearWithDropout(in_features=self.d_mod, out_features=self.d_out, dropout_p=self.dropout_p)
+        )
+    
+    def forward(self, in_tensor):
+        out_tensor = self.embedding(in_tensor)
+        out_tensor = self.team_body(out_tensor)
+        out_tensor = self.player_body(out_tensor)
         out_tensor = self.pred(out_tensor)
         return out_tensor
