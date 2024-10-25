@@ -294,7 +294,7 @@ def dataloaders(name: str, x_version: str, y_version: str, train_split: float=0.
 
     TARGETS FOR TEAM: batch x 2 x n_targets
     TARGETS FOR PLAYER: batch x n_players x n_targets
-    TARGETS FOR SCORE: batch x 1 x2
+    TARGETS FOR SCORE: batch x 1 x 2
 
     """
     if simple and engineered:
@@ -339,5 +339,5 @@ def dataloaders(name: str, x_version: str, y_version: str, train_split: float=0.
     val_dataloader = torch_data.DataLoader(dataset, batch_size=batch_size, sampler=valid_sampler, collate_fn=custom_collate)
     test_dataloader = torch_data.DataLoader(dataset, batch_size=batch_size, sampler=test_sampler, collate_fn=custom_collate)
 
-    # torch.save((train_dataloader, val_dataloader, test_dataloader), dataloaders_path)
+    torch.save((train_dataloader, val_dataloader, test_dataloader), dataloaders_path)
     return train_dataloader, val_dataloader, test_dataloader
