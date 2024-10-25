@@ -1,13 +1,25 @@
 import os, pickle, torch, random
 from typing import Tuple, Dict, Any, List
-from torch.utils.data import DataLoader, Dataset, SubsetRandomSampler
+from torch.utils import data as torch_data
 import pandas as pd
-from torch import Tensor
-from src.ml.model import gaussian_expansion
+import torch
+from src.ml import model
 from IPython.display import clear_output
 
 class Game():
-    def __init__(self, x: Dict[str, Tensor], y: Dict[str, Tensor], metadata: Dict[str, Any]):
+    """
+    class to store single game's data. really just a wrapper for dictionaries.
+
+    parameters
+    ----------
+    x: Dict[str, torch.Tensor]
+        input data for given game. for example, player's weighted statistics up to game.
+    y: Dict[str, torch.Tensor]
+        output data for given game. for example, player's statistics in game.
+    metadata: Dict[str, Any]
+        metadata for given game. for example, season, date, home_players, away_players.
+    """
+    def __init__(self, x: Dict[str, torch.Tensor], y: Dict[str, torch.Tensor], metadata: Dict[str, Any]):
         self.x = x
         self.y = y
         self.metadata = metadata
@@ -15,7 +27,23 @@ class Game():
     def __str__(self):
         return str(self.metadata)
 
-class GameDataset(Dataset):
+class GameDataset(torch_data.Dataset):
+    """
+    class to store a dataset of games. really just a wrapper for a list of Game objects with nice preprocessing functionality.
+
+    parameters
+    ----------
+    name: str
+        name of dataset. if name already exists, will load from file, so no need to specify data versions.
+    player_x_version: str = None
+        version of player statistics to use for inputs. 
+    player_y_version: str = None
+        version of player statistics to use for targets.
+    team_x_version: str = None
+        version of team statistics to use for inputs.
+    team_y_version: str = None
+        version of team statistics to use for targets.
+    """
     def __init__(self, name: str, player_x_version: str = None, player_y_version: str = None, team_x_version: str = None, team_y_version: str = None):
         self.data = self._init_data(name=name, player_x_version=player_x_version, player_y_version=player_y_version, team_x_version=team_x_version, team_y_version=team_y_version)
         
@@ -38,13 +66,8 @@ class GameDataset(Dataset):
             'team_y_version': team_y_version,
         }
         data = []
-        year_strings = [f'20{year-1:02d}-{year:02d}' for year in range(2,22)]
-        print(year_strings)
-        for year_string in year_strings:
-            path_to_load = f'data/dataset/elephant_{year_string}.pt'
-            data += torch.load(path_to_load)
+        # customize df here to load games you want
         game_df = pd.read_csv('data/game/bbref_game.csv')
-        game_df = game_df[~game_df['SEASON'].isin(['2000-01'] + year_strings)]
         team_player_dict = pickle.load(open('data/team_player_dict/team_player_dict 2.pkl', 'rb'))
         for season in game_df['SEASON'].unique():
             season_df = game_df[game_df['SEASON'] == season]
@@ -65,7 +88,7 @@ class GameDataset(Dataset):
             
             teams = [home, away]
             
-            # clear any previous print output
+            # clear previous print output
             clear_output()
             print(f'beginning processing of {home} vs. {away} on {date}')
             
@@ -91,6 +114,7 @@ class GameDataset(Dataset):
                         df = pd.read_csv(f'data/player/{player_version}/{player}.csv')
                         df = df[df['DATE'] == date]
                         if z == 'x':
+                            # distinguish home and away players with last-column flags
                             if player in home_players:
                                 df['HOME'] = 1
                             else:
@@ -153,106 +177,80 @@ class GameDataset(Dataset):
     def __getitem__(self, index: int) -> Game:
         return self.data[index]
     
-def custom_collate(batch):
-    # Separate inputs and targets
-    inputs = [item[0] for item in batch]
-    targets = [item[1] for item in batch]
-    
-    # Find the maximum number of players
-    max_players = max(inp.shape[0] for inp in inputs)
-    
-    # Pad inputs
-    padded_inputs = []
-    for inp in inputs:
-        n_players, emb_dim = inp.shape
-        padding = torch.zeros(max_players - n_players, emb_dim)
-        padded_inp = torch.cat([inp, padding], dim=0)
-        padded_inputs.append(padded_inp)
-    
-    # Stack padded inputs and targets
-    padded_inputs = torch.stack(padded_inputs)
-    targets = torch.stack(targets)
-    
-    return padded_inputs, targets
+def custom_collate(batch: List[Tuple[torch.Tensor, torch.Tensor]]) -> Tuple[torch.Tensor, torch.Tensor]:
+    """
+    custom collate function to handle padding of inputs and targets given that number of players in a game may vary.
 
-def custom_collate(batch):
-    # Separate inputs and targets
+    parameters
+    ----------
+    batch: List[Tuple[torch.Tensor, torch.Tensor]]
+        batch of games to be collated.
+
+    returns
+    -------
+    Tuple[torch.Tensor, torch.Tensor]
+        inputs and targets, properly padded with zeros so that each game in a given batch has the same player dimension (if applicable).
+    """
+    # separate inputs and targets
     inputs = [item[0] for item in batch]
     targets = [item[1] for item in batch]
     
-    # Find the maximum number of players
-    max_players = max(inp.shape[0] for inp in inputs)
-    
-    # Pad inputs
-    padded_inputs = []
-    padded_targets = []
+    # find the maximum number of players
+    max_inputs = max(inp.shape[0] for inp in inputs)
+    max_target = max(target.shape[0] for target in targets)
+
+    # padding along player dimension
+    # if inputs or outputs are not player-wise, max_ == n_ for all items in batch, so this does nothing but does not break anything
+    padded_targets, padded_inputs = [], []
     for inp, target in zip(inputs, targets):
-        n_players, emb_dim = inp.shape
-        inp_padding = torch.zeros(max_players - n_players, emb_dim)
-        target_padding = torch.zeros(max_players - n_players)
-        padded_inp = torch.cat([inp, inp_padding], dim=0)
-        print(target.shape)
-        print(target_padding.shape)
+        n_targets = target.shape[0]
+        n_inputs = inp.shape[0]
+        target_padding = torch.zeros(max_target - n_targets, target.shape[1])
+        input_padding = torch.zeros(max_inputs - n_inputs, inp.shape[1])
         padded_target = torch.cat([target, target_padding], dim=0)
-        padded_inputs.append(padded_inp)
+        padded_input = torch.cat([inp, input_padding], dim=0)
         padded_targets.append(padded_target)
-    
-    # Stack padded inputs and targets
+        padded_inputs.append(padded_input)
+
+    # turn batch list into tensor
     padded_inputs = torch.stack(padded_inputs)
     padded_targets = torch.stack(padded_targets)
     
     return padded_inputs, padded_targets
 
-def reshape_x(tensor):
-    return tensor.view(tensor.shape[0], -1)
+def shape_dataset(dataset: List[Tuple[torch.Tensor, torch.Tensor]]) -> List[Tuple[torch.Tensor, torch.Tensor]]:
+    if len(dataset[0][1].shape) == 1:
+        dataset = [(x, y.unsqueeze(dim=0)) for x, y in dataset]
+    return dataset
 
-def normalize_dataset(dataset):
-    all_first_items = torch.cat([item[0] for item in dataset], dim=0)
-    all_second_items = torch.stack([item[1] for item in dataset])
-    
+def normalize_dataset(dataset: List[Tuple[torch.Tensor, torch.Tensor]]) -> List[Tuple[torch.Tensor, torch.Tensor]]:
     # calculate max values across the entire dataset
-    max_first_values, _ = torch.max(torch.abs(all_first_items), dim=0)
-    max_second_values, _ = torch.max(torch.abs(all_second_items), dim=0)
+    all_inputs = torch.cat([item[0] for item in dataset], dim=0)
+    all_targets = torch.cat([item[1] for item in dataset], dim=0)
+
+    max_input, _ = torch.max(torch.abs(all_inputs), dim=0)
+    max_target, _ = torch.max(torch.abs(all_targets), dim=0)
     
     # normalize all first items by dividing by the max
-    normalized_first_items = all_first_items / (max_first_values + 1e-8)  # add small epsilon to avoid division by zero
-    normalized_second_items = all_second_items / (max_second_values + 1e-8)  # add small epsilon to avoid division by zero
+    normalized_inputs = all_inputs / (max_input + 1e-8)  # add small epsilon to avoid division by zero
+    normalized_targets = all_targets / (max_target + 1e-8)  # add small epsilon to avoid division by zero
     
-    normalized_list = []
-    start_idx = 0
-    for idx, item in enumerate(dataset):
-        n_players = item[0].shape[0]
-        end_idx = start_idx + n_players
-        normalized_game = normalized_first_items[start_idx:end_idx]
-        normalized_result = normalized_second_items[idx].view(-1)
-        normalized_list.append((normalized_game, normalized_result))
-        start_idx = end_idx
-    
-    return normalized_list
+    # now normalized_inputs and normalized_targets are concatenated along the 0th dimension
+    # this split them back up into their original sizes
+    normalized_dataset = []
+    input_index, target_index = 0, 0
+    for i in range(len(dataset)):
+        n_inputs = dataset[i][0].shape[0]
+        n_targets = dataset[i][1].shape[0]
+        end_input_index = input_index + n_inputs
+        end_target_index = target_index + n_targets
+        normalized_input = normalized_inputs[input_index:end_input_index]
+        normalized_target = normalized_targets[target_index:end_target_index]
+        normalized_dataset.append((normalized_input, normalized_target))
+        input_index = end_input_index
+        target_index = end_target_index
 
-def festively_normalize_dataset(dataset):
-    all_first_items = torch.cat([item[0] for item in dataset], dim=0)
-    all_second_items = torch.cat([item[1] for item in dataset], dim=0)
-    
-    # calculate max values across the entire dataset
-    max_first_values, _ = torch.max(torch.abs(all_first_items), dim=0)
-    max_second_values, _ = torch.max(torch.abs(all_second_items), dim=0)
-    
-    # normalize all first items by dividing by the max
-    normalized_first_items = all_first_items / (max_first_values + 1e-8)  # add small epsilon to avoid division by zero
-    normalized_second_items = all_second_items / (max_second_values + 1e-8)  # add small epsilon to avoid division by zero
-    
-    normalized_list = []
-    start_idx = 0
-    for idx, item in enumerate(dataset):
-        n_players = item[0].shape[0]
-        end_idx = start_idx + n_players
-        normalized_game = normalized_first_items[start_idx:end_idx]
-        normalized_result = normalized_second_items[start_idx:end_idx]
-        normalized_list.append((normalized_game, normalized_result))
-        start_idx = end_idx
-    
-    return normalized_list
+    return normalized_dataset
 
 def engineer_dataset(dataset):
     index_to_feature_dim_map = {0: 6, 1: 4, 2: 4, 3: 1, 4: 2, 5: 2, 7: 2, 8: 2, 10: 2, 11: 2, 13: 2, 14: 1, 15: 3, 16: 4, 17: 2, 18: 2, 19: 2, 21: 6, 22: 4, 23: 2, 24: 1, 25: 1, 36: 2, 37: 3, 38: 2, 39: 1}
@@ -260,129 +258,14 @@ def engineer_dataset(dataset):
     for x, y in dataset:
         features_list = []
         for idx, feature_dim in index_to_feature_dim_map.items():
-            expanded_feature = gaussian_expansion(x[:,idx].unsqueeze(dim=1), min=0, max=1, out_features=feature_dim)
+            expanded_feature = model.gaussian_expansion(x[:,idx].unsqueeze(dim=1), min=0, max=1, out_features=feature_dim)
             features_list.append(expanded_feature)
         new_features = torch.cat(features_list, dim=1)
         engineered_list.append((new_features, y))
     
     return engineered_list
 
-def get_dataloaders(name: str,
-                    x_version: str,
-                    y_version: str,
-                    train_split: float=0.8, 
-                    val_split: float=0.1, 
-                    test_split: float=0.1, 
-                    batch_size: int=32) -> Tuple[DataLoader, DataLoader, DataLoader]:
-    try:
-        dataset = GameDataset(name=name)
-        dataset = [(data.x[x_version].float(), data.y[y_version].float()) for data in dataset]
-        dataset = normalize_dataset(dataset)
-    except:
-        raise ValueError(f'dataset {name} not found. please build dataset before loading datalaoders on it.')
-    
-    total_size = len(dataset)
-    indices = list(range(total_size))
-    random.shuffle(indices)
-
-    train_size = int(total_size * train_split)
-    val_size = int(total_size * val_split)
-    test_size = total_size - train_size - val_size
-
-    train_indices, val_indices, test_indices = indices[:train_size], indices[train_size:train_size+val_size], indices[train_size+val_size:]
-
-    train_sampler = SubsetRandomSampler(train_indices)
-    valid_sampler = SubsetRandomSampler(val_indices)
-    test_sampler = SubsetRandomSampler(test_indices)
-
-    train_dataloader = DataLoader(dataset, batch_size=batch_size, sampler=train_sampler, collate_fn=custom_collate)
-    val_dataloader = DataLoader(dataset, batch_size=batch_size, sampler=valid_sampler, collate_fn=custom_collate)
-    test_dataloader = DataLoader(dataset, batch_size=batch_size, sampler=test_sampler, collate_fn=custom_collate)
-
-    return train_dataloader, val_dataloader, test_dataloader
-
-def get_engineered_dataloaders(name: str,
-                    x_version: str,
-                    y_version: str,
-                    train_split: float=0.8, 
-                    val_split: float=0.1, 
-                    test_split: float=0.1, 
-                    batch_size: int=32) -> Tuple[DataLoader, DataLoader, DataLoader]:
-    dataloaders_path = f'data/dataloader/{name}_{x_version}_{y_version}_{train_split}_{val_split}_{test_split}_{batch_size}.pt'
-    if os.path.exists(dataloaders_path):
-        return torch.load(dataloaders_path)
-    else:
-        try:
-            dataset = GameDataset(name=name)
-            dataset = [(data.x[x_version].float(), data.y[y_version].float()) for data in dataset]
-            dataset = normalize_dataset(dataset)
-            dataset = engineer_dataset(dataset)
-        except:
-            raise ValueError(f'dataset {name} not found. please build dataset before loading datalaoders on it.')
-        
-        total_size = len(dataset)
-        indices = list(range(total_size))
-        random.shuffle(indices)
-
-        train_size = int(total_size * train_split)
-        val_size = int(total_size * val_split)
-        test_size = total_size - train_size - val_size
-
-        train_indices, val_indices, test_indices = indices[:train_size], indices[train_size:train_size+val_size], indices[train_size+val_size:]
-
-        train_sampler = SubsetRandomSampler(train_indices)
-        valid_sampler = SubsetRandomSampler(val_indices)
-        test_sampler = SubsetRandomSampler(test_indices)
-
-        train_dataloader = DataLoader(dataset, batch_size=batch_size, sampler=train_sampler, collate_fn=custom_collate)
-        val_dataloader = DataLoader(dataset, batch_size=batch_size, sampler=valid_sampler, collate_fn=custom_collate)
-        test_dataloader = DataLoader(dataset, batch_size=batch_size, sampler=test_sampler, collate_fn=custom_collate)
-
-        torch.save((train_dataloader, val_dataloader, test_dataloader), dataloaders_path)
-        return train_dataloader, val_dataloader, test_dataloader
-    
-
-def get_simplified_dataloaders(name: str,
-                    x_version: str,
-                    y_version: str,
-                    train_split: float=0.8, 
-                    val_split: float=0.1, 
-                    test_split: float=0.1, 
-                    batch_size: int=32) -> Tuple[DataLoader, DataLoader, DataLoader]:
-    dataloaders_path = f'data/dataloader/simplified_{name}_{x_version}_{y_version}_{train_split}_{val_split}_{test_split}_{batch_size}.pt'
-    if os.path.exists(dataloaders_path):
-        return torch.load(dataloaders_path)
-    else:
-        try:
-            dataset = GameDataset(name=name)
-            dataset = [(data.x[x_version].float(), data.y[y_version].float()) for data in dataset]
-            dataset = normalize_dataset(dataset)
-            dataset = simplify_dataset(dataset)
-        except:
-            raise ValueError(f'dataset {name} not found. please build dataset before loading datalaoders on it.')
-        
-        total_size = len(dataset)
-        indices = list(range(total_size))
-        random.shuffle(indices)
-
-        train_size = int(total_size * train_split)
-        val_size = int(total_size * val_split)
-        test_size = total_size - train_size - val_size
-
-        train_indices, val_indices, test_indices = indices[:train_size], indices[train_size:train_size+val_size], indices[train_size+val_size:]
-
-        train_sampler = SubsetRandomSampler(train_indices)
-        valid_sampler = SubsetRandomSampler(val_indices)
-        test_sampler = SubsetRandomSampler(test_indices)
-
-        train_dataloader = DataLoader(dataset, batch_size=batch_size, sampler=train_sampler, collate_fn=custom_collate)
-        val_dataloader = DataLoader(dataset, batch_size=batch_size, sampler=valid_sampler, collate_fn=custom_collate)
-        test_dataloader = DataLoader(dataset, batch_size=batch_size, sampler=test_sampler, collate_fn=custom_collate)
-
-        torch.save((train_dataloader, val_dataloader, test_dataloader), dataloaders_path)
-        return train_dataloader, val_dataloader, test_dataloader
-
-def simplify_dataset(dataset):
+def simplify_dataset(dataset: List[Tuple[torch.Tensor, torch.Tensor]]) -> List[Tuple[torch.Tensor, torch.Tensor]]:
     # 0: MP, 1: FGM, 2: FGA, 3: FG%, 4: 2PT_FGM, 
     # 5: 2PT_FGA, 6: 2PT_FG%, 7: 3PT_FGM, 8: 3PT_FGA, 
     # 9: 3PT_FG%, 10: FTM, 11: FTA, 12: FT%, 
@@ -395,51 +278,66 @@ def simplify_dataset(dataset):
     # 37: DRTG, 38: BPM
     # index_list = [0, 13, 14, 16, 17, 18, 19, 21, 37, 38]
     index_list = [0,1,2,3,4,5,7,8,10,11,13,14,15,16,17,18,19,21,22,23,24,25,36,37,38,39]
-    engineered_list = []
+    simplified_list = []
     for x, y in dataset:
         features_list = []
         for index in index_list:
             selected_feature = x[:,index].unsqueeze(dim=1)
             features_list.append(selected_feature)
         new_features = torch.cat(features_list, dim=1)
-        engineered_list.append((new_features, y))
+        simplified_list.append((new_features, y))
     
-    return engineered_list
+    return simplified_list
 
-def get_festive_dataloaders(name: str,
-                    train_split: float=0.8, 
-                    val_split: float=0.1, 
-                    test_split: float=0.1, 
-                    batch_size: int=32) -> Tuple[DataLoader, DataLoader, DataLoader]:
-    dataloaders_path = f'data/dataloader/simplified_{name}_festive_{train_split}_{val_split}_{test_split}_{batch_size}.pt'
+def dataloaders(name: str, x_version: str, y_version: str, train_split: float=0.8,  val_split: float=0.1, test_split: float=0.1, batch_size: int=32, simple: bool=False, engineered: bool=False) -> Tuple[torch_data.DataLoader, torch_data.DataLoader, torch_data.DataLoader]:
+    """
+
+    TARGETS FOR TEAM: batch x 2 x n_targets
+    TARGETS FOR PLAYER: batch x n_players x n_targets
+    TARGETS FOR SCORE: batch x 1 x2
+
+    """
+    if simple and engineered:
+        raise ValueError('cannot specify both simple and engineered.')
+    dataset_spec = f'{name}_{x_version}_{y_version}_{train_split}_{val_split}_{test_split}_{batch_size}'
+    if simple:
+        dataset_spec += '_simple'
+    elif engineered:
+        dataset_spec += '_engineered'
+    dataloaders_path = f'data/dataloader/{dataset_spec}.pt'
     if os.path.exists(dataloaders_path):
         return torch.load(dataloaders_path)
     else:
         try:
             dataset = GameDataset(name=name)
-            dataset = [(data.x['players'].float(), data.y['players'][:,21].float()) for data in dataset]
-            dataset = festively_normalize_dataset(dataset)
-            dataset = engineer_dataset(dataset)
         except:
             raise ValueError(f'dataset {name} not found. please build dataset before loading datalaoders on it.')
         
-        total_size = len(dataset)
-        indices = list(range(total_size))
-        random.shuffle(indices)
+    dataset = [(data.x[x_version].float(), data.y[y_version].float()) for data in dataset]
+    dataset = shape_dataset(dataset)
+    dataset = normalize_dataset(dataset)
+    if simple:
+        dataset = simplify_dataset(dataset)
+    elif engineered:
+            dataset = engineer_dataset(dataset)
 
-        train_size = int(total_size * train_split)
-        val_size = int(total_size * val_split)
-        test_size = total_size - train_size - val_size
+    total_size = len(dataset)
+    indices = list(range(total_size))
+    random.shuffle(indices)
 
-        train_indices, val_indices, test_indices = indices[:train_size], indices[train_size:train_size+val_size], indices[train_size+val_size:]
+    train_size = int(total_size * train_split)
+    val_size = int(total_size * val_split)
+    test_size = int(total_size * test_split)
 
-        train_sampler = SubsetRandomSampler(train_indices)
-        valid_sampler = SubsetRandomSampler(val_indices)
-        test_sampler = SubsetRandomSampler(test_indices)
+    train_indices, val_indices, test_indices = indices[:train_size], indices[train_size:train_size+val_size], indices[-test_size:]
 
-        train_dataloader = DataLoader(dataset, batch_size=batch_size, sampler=train_sampler, collate_fn=festive_collate)
-        val_dataloader = DataLoader(dataset, batch_size=batch_size, sampler=valid_sampler, collate_fn=festive_collate)
-        test_dataloader = DataLoader(dataset, batch_size=batch_size, sampler=test_sampler, collate_fn=festive_collate)
+    train_sampler = torch_data.SubsetRandomSampler(train_indices)
+    valid_sampler = torch_data.SubsetRandomSampler(val_indices)
+    test_sampler = torch_data.SubsetRandomSampler(test_indices)
 
-        torch.save((train_dataloader, val_dataloader, test_dataloader), dataloaders_path)
-        return train_dataloader, val_dataloader, test_dataloader
+    train_dataloader = torch_data.DataLoader(dataset, batch_size=batch_size, sampler=train_sampler, collate_fn=custom_collate)
+    val_dataloader = torch_data.DataLoader(dataset, batch_size=batch_size, sampler=valid_sampler, collate_fn=custom_collate)
+    test_dataloader = torch_data.DataLoader(dataset, batch_size=batch_size, sampler=test_sampler, collate_fn=custom_collate)
+
+    # torch.save((train_dataloader, val_dataloader, test_dataloader), dataloaders_path)
+    return train_dataloader, val_dataloader, test_dataloader
