@@ -96,7 +96,7 @@ class MckinneyPlayerModel(nn.Module):
             MultiHeadWrapper(d_mod=self.d_mod, n_heads=4),
             self.act,
             nn.LayerNorm(normalized_shape=self.d_mod),
-            InitializedLinear(d_mod=self.d_mod),
+            InitializedLinear(in_features=self.d_mod, out_features=self.d_mod),
             nn.Dropout(p=self.dropout_p),
             self.act,
             nn.LayerNorm(normalized_shape=self.d_mod)
@@ -111,5 +111,81 @@ class MckinneyPlayerModel(nn.Module):
     def forward(self, in_tensor: torch.Tensor) -> torch.Tensor:
         out_tensor = self.embedding(in_tensor)
         out_tensor = self.body(out_tensor)
+        out_tensor = self.pred(out_tensor)
+        return out_tensor
+
+class HomeAwayModel(nn.Module):
+    def __init__(self, d_in, d_mod, d_out):
+        super().__init__()
+        self.d_in, self.d_mod, self.d_out = d_in, d_mod, d_out
+        self.act = nn.ReLU()
+        self.dropout_p = 0.0
+
+        self.embedding = nn.Sequential(
+            MultiHeadWrapper(d_mod=self.d_in, n_heads=5),
+            self.act,
+            nn.LayerNorm(normalized_shape=self.d_in),
+            InitializedLinear(in_features=self.d_in, out_features=self.d_mod),
+            nn.Dropout(p=self.dropout_p),
+            self.act,
+            nn.LayerNorm(normalized_shape=self.d_mod),
+            InitializedLinear(in_features=self.d_mod, out_features=self.d_mod),
+            nn.Dropout(p=self.dropout_p),
+            self.act,
+            nn.LayerNorm(normalized_shape=self.d_mod)
+        )
+
+        self.home_pred = nn.Sequential(
+            MeanFirstDim(),
+            InitializedLinear(in_features=self.d_mod, out_features=1),
+            nn.Dropout(p=self.dropout_p)
+        )
+
+        self.away_pred = nn.Sequential(
+            MeanFirstDim(),
+            InitializedLinear(in_features=self.d_mod, out_features=1),
+            nn.Dropout(p=self.dropout_p)
+        )
+        
+    def forward(self, in_tensor: torch.Tensor) -> torch.Tensor:
+        out_tensor = self.embedding(in_tensor)
+        home_tensor, away_tensor = home_away_tensors(in_tensor=out_tensor, original_tensor=in_tensor)
+        home_pred = self.home_pred(home_tensor)
+        away_pred = self.away_pred(away_tensor)
+        out_tensor = torch.cat((home_pred, away_pred), dim=1).unsqueeze(dim=2)
+        return out_tensor
+    
+class PlayerScoreModel(nn.Module):
+    def __init__(self, d_in, d_mod):
+        super().__init__()
+        self.d_in, self.d_mod = d_in, d_mod
+        self.act = nn.ReLU()
+        self.dropout_p = 0.0
+
+        self.embedding = nn.Sequential(
+            InitializedLinear(in_features=self.d_in, out_features=self.d_mod),
+            nn.Dropout(p=self.dropout_p),
+            self.act,
+            nn.LayerNorm(normalized_shape=self.d_mod),
+            InitializedLinear(in_features=self.d_mod, out_features=self.d_mod),
+            nn.Dropout(p=self.dropout_p),
+            self.act,
+            nn.LayerNorm(normalized_shape=self.d_mod),
+        )
+
+        self.body = nn.Sequential(
+            MultiHeadWrapper(d_mod=self.d_mod, n_heads=4),
+            self.act,
+            nn.LayerNorm(normalized_shape=self.d_mod),
+        )
+
+        self.pred = nn.Sequential(
+            InitializedLinear(in_features=self.d_mod, out_features=1),
+            nn.Dropout(p=self.dropout_p),
+        )
+     
+    def forward(self, in_tensor: torch.Tensor) -> torch.Tensor:
+        out_tensor = self.embedding(in_tensor)
+        out_tensor = self.body(out_tensor) + out_tensor
         out_tensor = self.pred(out_tensor)
         return out_tensor

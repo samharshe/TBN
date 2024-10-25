@@ -1,5 +1,5 @@
-import torch, sys, functools, wandb
-from collections import defaultdict
+import torch, sys, wandb
+from src.ml import model as model_utils
 from torch import nn
 from torch.utils import data as torch_data
 from torch import optim
@@ -53,11 +53,68 @@ def train_test(model: nn.Module, optimizer: optim.Optimizer, loss_fn: Callable, 
             test_score(model=model, loss_fn=loss_fn, test_dataloader=test_dataloader)
         elif y_version == 'home_win':
             test_classifier(model=model, loss_fn=loss_fn, test_dataloader=test_dataloader)
+        elif y_version == 'player_score':
+            test_player_score(model=model, loss_fn=loss_fn, test_dataloader=test_dataloader)
         # perhaps other test functions to be added later
         else:
             raise ValueError(f'y_version must be either "score" or "home_win". passed value: {y_version}.')
     finally:
         wandb.finish()
+
+def test_player_score(model: nn.Module, loss_fn: Callable,  test_dataloader: torch_data.DataLoader) -> None:
+    """tests model that predicts player scores.
+
+    parameters
+    ----------
+    model: Module
+        self-explanatory.
+    loss_fn: Callable
+        self-explanatory.
+    test_dataloader: DataLoader
+        self-explanatory.
+    """
+    # track training losses
+    test_losses = []
+    # track correct predictions
+    n_correct, n_total = 0, 0
+    # do not track gradients
+    model.eval()
+    for data in test_dataloader:
+        # get input from data item
+        x, y = data
+        
+        # predictions from the model
+        y_hat = model(x)
+
+        home_y_hat, away_y_hat = model_utils.home_away_tensors(in_tensor=y_hat, original_tensor=x)
+        home_y, away_y = model_utils.home_away_tensors(in_tensor=y, original_tensor=x)
+        home_y_hat, away_y_hat = torch.sum(home_y_hat, dim=1), torch.sum(away_y_hat, dim=1)
+        y_hat = torch.cat((home_y_hat, away_y_hat), dim=1)
+        home_y, away_y = torch.sum(home_y, dim=1), torch.sum(away_y, dim=1)
+        y = torch.cat((home_y, away_y), dim=1)
+        home_win_pred = y_hat[:, 0] > y_hat[:, 1]
+        home_win_actual = y[:, 0] > y[:, 1]
+
+        # keep track of correct predictions
+        n_correct += torch.sum(home_win_pred == home_win_actual).item()
+        n_total += len(y)
+        
+        # loss using passed loss function
+        loss = loss_fn(y_hat, y)
+        
+        # keep track of training losses
+        test_losses.append(loss.item())
+    
+    # calculate and log mean losses from this epoch
+    test_mean_loss = torch.mean(torch.tensor(test_losses)).item()
+    test_accuracy = n_correct/n_total
+    
+    # print out results of epoch
+    print(f'TEST MEAN LOSS: {test_mean_loss:04f}')
+    print(f'TEST ACCURACY: {test_accuracy:04f}')
+    
+    # log to wandb
+    wandb.log({"test_mean_loss": test_mean_loss, "test_accuracy": test_accuracy})
 
 def test_classifier(model: nn.Module, loss_fn: Callable,  test_dataloader: torch_data.DataLoader) -> None:
     """tests model that predicts binary outcomes.
@@ -123,8 +180,8 @@ def test_score(model: nn.Module, loss_fn: Callable, test_dataloader: torch_data.
         normalization_tensor = torch.tensor([175., 176.])
         unnormalized_y_hat = y_hat * normalization_tensor
         unnormalized_y = y * normalization_tensor
-        home_win_pred = unnormalized_y_hat[:, 0] > unnormalized_y_hat[:, 1]
-        home_win_actual = unnormalized_y[:, 0] > unnormalized_y[:, 1]
+        home_win_pred = unnormalized_y_hat[:, 0, 0] > unnormalized_y_hat[:, 1, 0]
+        home_win_actual = unnormalized_y[:, 0, 0] > unnormalized_y[:, 1, 0]
         
         # keep track of 
         n_correct += torch.sum(home_win_pred == home_win_actual).item()
@@ -145,7 +202,7 @@ def test_score(model: nn.Module, loss_fn: Callable, test_dataloader: torch_data.
     print(f'TEST ACCURACY: {test_accuracy:04f}')
     
     # Log to wandb
-    wandb.log({"test_mean_loss": test_mean_loss, "test_accuracy": test_accuracy})
+    # wandb.log({"test_mean_loss": test_mean_loss, "test_accuracy": test_accuracy})
 
 def train(model: nn.Module, optimizer: optim.Optimizer, scheduler: lr_scheduler.LRScheduler, loss_fn: Callable, train_dataloader: torch_data.DataLoader, val_dataloader: torch_data.DataLoader, n_epochs: int, name: str) -> None:
     """trains model on dataloader, saves weights of the best-performing model, and logs ongoing results through wandb.

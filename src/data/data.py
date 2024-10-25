@@ -220,7 +220,6 @@ def custom_collate(batch: List[Tuple[torch.Tensor, torch.Tensor]]) -> Tuple[torc
 
 def shape_dataset(dataset: List[Tuple[torch.Tensor, torch.Tensor]]) -> List[Tuple[torch.Tensor, torch.Tensor]]:
     if len(dataset[0][1].shape) == 1:
-        print('reshaping dataset')
         dataset = [(x, y.unsqueeze(dim=1)) for x, y in dataset]
     return dataset
 
