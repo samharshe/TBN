@@ -177,7 +177,7 @@ class GameDataset(torch_data.Dataset):
     def __getitem__(self, index: int) -> Game:
         return self.data[index]
     
-def custom_collate(batch: List[Tuple[torch.Tensor, torch.Tensor]]) -> Tuple[torch.Tensor, torch.Tensor]:
+def custom_collate(batch: List[Tuple[torch.Tensor, torch.Tensor]]) -> Tuple[List[torch.Tensor], torch.Tensor]:
     """
     custom collate function to handle padding of inputs and targets given that number of players in a game may vary.
 
@@ -188,66 +188,67 @@ def custom_collate(batch: List[Tuple[torch.Tensor, torch.Tensor]]) -> Tuple[torc
 
     returns
     -------
-    Tuple[torch.Tensor, torch.Tensor]
+    Tuple[List[torch.Tensor], torch.Tensor]
         inputs and targets, properly padded with zeros so that each game in a given batch has the same player dimension (if applicable).
     """
     # separate inputs and targets
-    inputs = [item[0] for item in batch]
-    targets = [item[1] for item in batch]
+    inputs = [item[0] for item in batch] # list of length len(batch) of lists of length (# types of inputs)
+    targets = [item[1] for item in batch] # list of length len(batch) of tensors of shape (sequence_length, target_length)
     
-    # find the maximum number of players
-    max_inputs = max(inp.shape[0] for inp in inputs)
+    # find the max sequence length (either n players or n teams)
+    max_input_list = [max(input[i].shape[0] for input in inputs) for i in range(len(inputs[0]))] # list of length (# types of inputs), each of whose values is the maximum sequence length of value of corresponding type
     max_target = max(target.shape[0] for target in targets)
 
     # padding along player dimension
     # if inputs or outputs are not player-wise, max_ == n_ for all items in batch, so this does nothing but does not break anything
-    padded_targets, padded_inputs = [], []
-    for inp, target in zip(inputs, targets):
+    padded_inputs_list = [[] for _ in range(len(inputs[0]))]
+    padded_targets = []
+    for input_list, target in zip(inputs, targets):
+        n_inputs = [input.shape[0] for input in input_list] # list of sequence lengths for each input for this particular item in batch
         n_targets = target.shape[0]
-        n_inputs = inp.shape[0]
+        input_padding = [torch.zeros(max_input_list[i] - n_inputs[i], input_list[i].shape[1]) for i in range(len(input_list))] # padding is length of longest sequence length in batch - sequence length of this particular item
         target_padding = torch.zeros(max_target - n_targets, target.shape[1])
-        input_padding = torch.zeros(max_inputs - n_inputs, inp.shape[1])
+        padded_inputs = [torch.cat([input_list[i], input_padding[i]], dim=0) for i in range(len(input_list))] # concatenate this item with padding for each feature type
         padded_target = torch.cat([target, target_padding], dim=0)
-        padded_input = torch.cat([inp, input_padding], dim=0)
+        [padded_inputs_list[i].append(padded_inputs[i]) for i in range(len(padded_inputs))]
         padded_targets.append(padded_target)
-        padded_inputs.append(padded_input)
 
     # turn batch list into tensor
-    padded_inputs = torch.stack(padded_inputs)
+    padded_inputs = [torch.stack(padded_input) for padded_input in padded_inputs_list]
     padded_targets = torch.stack(padded_targets)
     
     return padded_inputs, padded_targets
 
 def shape_dataset(dataset: List[Tuple[torch.Tensor, torch.Tensor]]) -> List[Tuple[torch.Tensor, torch.Tensor]]:
     if len(dataset[0][1].shape) == 1:
-        dataset = [(x, y.unsqueeze(dim=1)) for x, y in dataset]
+        dataset = [(data[0], data[1].unsqueeze(dim=1)) for data in dataset]
     return dataset
 
-def normalize_dataset(dataset: List[Tuple[torch.Tensor, torch.Tensor]]) -> List[Tuple[torch.Tensor, torch.Tensor]]:
+def normalize_dataset(dataset: List[Tuple[List[torch.Tensor], torch.Tensor]]) -> List[Tuple[List[torch.Tensor], torch.Tensor]]:
     # calculate max values across the entire dataset
-    all_inputs = torch.cat([item[0] for item in dataset], dim=0)
-    all_targets = torch.cat([item[1] for item in dataset], dim=0)
-
-    max_input, _ = torch.max(torch.abs(all_inputs), dim=0)
-    max_target, _ = torch.max(torch.abs(all_targets), dim=0)
+    input_lists = [[x[i] for x, _ in dataset] for i in range(len(dataset[0][0]))]
+    all_input_tensors_list = [torch.cat(input_list, dim=0) for input_list in input_lists]
+    all_target_tensor = torch.cat([target for _, target in dataset], dim=0)
+    max_input_tensors_list = [torch.max(torch.abs(all_input_tensor), dim=0)[0] for all_input_tensor in all_input_tensors_list]
+    max_target_tensor, _ = torch.max(torch.abs(all_target_tensor), dim=0)
     
     # normalize all first items by dividing by the max
-    normalized_inputs = all_inputs / (max_input + 1e-8)  # add small epsilon to avoid division by zero
-    normalized_targets = all_targets / (max_target + 1e-8)  # add small epsilon to avoid division by zero
+    normalized_input_tensors_list = [all_input_tensor / (max_input + 1e-8) for all_input_tensor, max_input in zip(all_input_tensors_list, max_input_tensors_list)]  # add small epsilon to avoid division by zero
+    normalized_target_tensor = all_target_tensor / (max_target_tensor + 1e-8)  # add small epsilon to avoid division by zero
     
     # now normalized_inputs and normalized_targets are concatenated along the 0th dimension
     # this split them back up into their original sizes
     normalized_dataset = []
-    input_index, target_index = 0, 0
+    input_indices, target_index = [0]*len(dataset[0][0]), 0
     for i in range(len(dataset)):
-        n_inputs = dataset[i][0].shape[0]
-        n_targets = dataset[i][1].shape[0]
-        end_input_index = input_index + n_inputs
-        end_target_index = target_index + n_targets
-        normalized_input = normalized_inputs[input_index:end_input_index]
-        normalized_target = normalized_targets[target_index:end_target_index]
+        sequence_lengths = [input.shape[0] for input in dataset[i][0]]
+        target_length = dataset[i][1].shape[0]
+        input_end_indices = [input_index + sequence_length for input_index, sequence_length in zip(input_indices, sequence_lengths)]
+        end_target_index = target_index + target_length
+        normalized_input = [normalized_input_tensor[input_index:input_end_index] for normalized_input_tensor, input_index, input_end_index in zip(normalized_input_tensors_list, input_indices, input_end_indices)]
+        normalized_target = normalized_target_tensor[target_index:end_target_index]
         normalized_dataset.append((normalized_input, normalized_target))
-        input_index = end_input_index
+        input_indices = input_end_indices
         target_index = end_target_index
 
     return normalized_dataset
@@ -256,12 +257,13 @@ def engineer_dataset(dataset):
     index_to_feature_dim_map = {0: 6, 1: 4, 2: 4, 3: 1, 4: 2, 5: 2, 7: 2, 8: 2, 10: 2, 11: 2, 13: 2, 14: 1, 15: 3, 16: 4, 17: 2, 18: 2, 19: 2, 21: 6, 22: 4, 23: 2, 24: 1, 25: 1, 36: 2, 37: 3, 38: 2, 39: 1}
     engineered_list = []
     for x, y in dataset:
+        x_to_engineer = x[0]
         features_list = []
         for idx, feature_dim in index_to_feature_dim_map.items():
-            expanded_feature = model.gaussian_expansion(x[:,idx].unsqueeze(dim=1), min=0, max=1, out_features=feature_dim)
+            expanded_feature = model.gaussian_expansion(x_to_engineer[:,idx].unsqueeze(dim=1), min=0, max=1, out_features=feature_dim)
             features_list.append(expanded_feature)
         new_features = torch.cat(features_list, dim=1)
-        engineered_list.append((new_features, y))
+        engineered_list.append(([new_features]+x[1:], y))
     
     return engineered_list
 
@@ -279,13 +281,15 @@ def simplify_dataset(dataset: List[Tuple[torch.Tensor, torch.Tensor]]) -> List[T
     # index_list = [0, 13, 14, 16, 17, 18, 19, 21, 37, 38]
     index_list = [0,1,2,3,4,5,7,8,10,11,13,14,15,16,17,18,19,21,22,23,24,25,36,37,38,39]
     simplified_list = []
-    for x, y in dataset:
+    for data in dataset:
+        x, y = data
+        x_to_simplify = x[0]
         features_list = []
         for index in index_list:
-            selected_feature = x[:,index].unsqueeze(dim=1)
+            selected_feature = x_to_simplify[:,index].unsqueeze(dim=1)
             features_list.append(selected_feature)
         new_features = torch.cat(features_list, dim=1)
-        simplified_list.append((new_features, y))
+        simplified_list.append(([new_features]+x[1:], y))
     
     return simplified_list
 
@@ -297,29 +301,41 @@ def dataloaders(name: str, x_version: str, y_version: str, train_split: float=0.
     TARGETS FOR SCORE: batch x 1 x 2
 
     """
+    # throw error if two types of preprocessing are specified
     if simple and engineered:
         raise ValueError('cannot specify both simple and engineered.')
-    dataset_spec = f'{name}_{x_version}_{y_version}_{train_split}_{val_split}_{test_split}_{batch_size}'
+    
+    # define x spec string
+    x_versions = [x_version] if isinstance(x_version, str) else x_version
+    x_version_spec = '-'.join(x_versions)
+    dataset_spec = f'{name}_{x_version_spec}_{y_version}_{train_split}_{val_split}_{test_split}_{batch_size}'
+
+    # define dataset spec string
     if simple:
         dataset_spec += '_simple'
     elif engineered:
         dataset_spec += '_engineered'
+    
+    # make full path to dataloaders given spec string
     dataloaders_path = f'data/dataloader/{dataset_spec}.pt'
+
+    # if dataloaders already exist, load and return
     if os.path.exists(dataloaders_path):
         return torch.load(dataloaders_path)
+
+    # otherwise, get dataset and build dataloaders
     else:
         try:
             dataset = GameDataset(name=name)
         except:
-            raise ValueError(f'dataset {name} not found. please build dataset before loading datalaoders on it.')
-        
-    dataset = [(data.x[x_version].float(), data.y[y_version].float()) for data in dataset]
+            raise ValueError(f'dataset {name} not found. please build dataset before loading datalaoders on it.') 
+    dataset = [([data.x[x].float() for x in x_versions], data.y[y_version].float()) for data in dataset]
     dataset = shape_dataset(dataset)
     dataset = normalize_dataset(dataset)
     if simple:
         dataset = simplify_dataset(dataset)
     elif engineered:
-            dataset = engineer_dataset(dataset)
+        dataset = engineer_dataset(dataset)
 
     total_size = len(dataset)
     indices = list(range(total_size))
