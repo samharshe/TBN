@@ -266,25 +266,27 @@ def get_team_idx(dataset):
             return i
 
 def engineer_dataset(dataset: List[Tuple[List[torch.Tensor], torch.Tensor]], team_or_player: str) -> List[Tuple[List[torch.Tensor], torch.Tensor]]:
-    if team_or_player == 'player':
-        list_position = get_player_idx(dataset)
-        index_to_feature_dim_map = {0: 6, 1: 4, 2: 4, 3: 1, 4: 2, 5: 2, 7: 2, 8: 2, 10: 2, 11: 2, 13: 2, 14: 1, 15: 3, 16: 4, 17: 2, 18: 2, 19: 2, 21: 6, 22: 4, 23: 2, 24: 1, 25: 1, 36: 2, 37: 3, 38: 2, 39: 1}
-    elif team_or_player == 'team':
-        list_position = get_team_idx(dataset)
-        index_to_feature_dim_map = {0: 3, 1: 1, 2: 1, 3: 1, 6: 3, 7: 1, 9: 2, 10: 2, 11: 2, 12: 3, 13: 4, 15: 2, 16: 3, 17: 3, 18: 2, 20: 6, 21: 1, 22: 1, 23: 1, 24: 1, 32: 2, 33: 4}
-    else:
-        raise ValueError(f'team_or_player must be either "player" or "team", not {team_or_player}.')
-    engineered_list = []
-    for x, y in dataset:
-        x_to_engineer = x[list_position]
-        features_list = []
-        for idx, feature_dim in index_to_feature_dim_map.items():
-            expanded_feature = model.gaussian_expansion(x_to_engineer[:,idx].unsqueeze(dim=1), min=0, max=1, out_features=feature_dim)
-            features_list.append(expanded_feature)
-        new_features = torch.cat(features_list, dim=1)
-        engineered_list.append((x[:list_position]+[new_features]+x[list_position+1:], y))
-    
-    return engineered_list
+    team_or_player_list = [team_or_player] if isinstance(team_or_player, str) else team_or_player
+    engineered_dataset = dataset.copy()
+    for team_or_player in team_or_player_list:
+        if team_or_player == 'player':
+            list_position = get_player_idx(dataset)
+            index_to_feature_dim_map = {0: 6, 1: 4, 2: 4, 3: 1, 4: 2, 5: 2, 7: 2, 8: 2, 10: 2, 11: 2, 13: 2, 14: 1, 15: 3, 16: 4, 17: 2, 18: 2, 19: 2, 21: 6, 22: 4, 23: 2, 24: 1, 25: 1, 36: 2, 37: 3, 38: 2, 39: 1}
+        elif team_or_player == 'team':
+            list_position = get_team_idx(dataset)
+            index_to_feature_dim_map = {0: 3, 1: 1, 2: 1, 3: 1, 6: 3, 7: 1, 9: 2, 10: 2, 11: 2, 12: 3, 13: 4, 15: 2, 16: 3, 17: 3, 18: 2, 20: 6, 21: 1, 22: 1, 23: 1, 24: 1, 32: 2, 33: 4}
+        else:
+            raise ValueError(f'team_or_player must be either "player" or "team", not {team_or_player}.')
+        for idx, (x, _) in enumerate(engineered_dataset):
+            x_to_engineer = x[list_position]
+            features_list = []
+            for col, feature_dim in index_to_feature_dim_map.items():
+                expanded_feature = model.gaussian_expansion(x_to_engineer[:,col].unsqueeze(dim=1), min=0, max=1, out_features=feature_dim)
+                features_list.append(expanded_feature)
+            new_features = torch.cat(features_list, dim=1)
+            engineered_dataset[idx][0][list_position] = new_features
+
+    return engineered_dataset
 
 def simplify_dataset(dataset: List[Tuple[torch.Tensor, torch.Tensor]]) -> List[Tuple[torch.Tensor, torch.Tensor]]:
     # 0: MP, 1: FGM, 2: FGA, 3: FG%, 4: 2PT_FGM, 

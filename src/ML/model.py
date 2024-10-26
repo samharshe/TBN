@@ -56,7 +56,7 @@ class MeanSecondDim(nn.Module):
         super().__init__()
     
     def forward(self, in_tensor: torch.Tensor) -> torch.Tensor:
-        out_tensor = torch.mean(in_tensor, dim=2, keepdim=False)
+        out_tensor = torch.mean(in_tensor, dim=2, keepdim=True)
         return out_tensor
 
 class MeanFirstDim(nn.Module):
@@ -64,7 +64,7 @@ class MeanFirstDim(nn.Module):
         super().__init__()
     
     def forward(self, in_tensor):
-        out_tensor = torch.mean(in_tensor, dim=1, keepdim=False)
+        out_tensor = torch.mean(in_tensor, dim=1, keepdim=True)
         return out_tensor
 
 class SumFirstDim(nn.Module):
@@ -195,14 +195,91 @@ class TeamScoreModel(nn.Module):
         super().__init__()
         self.d_in, self.d_mod = d_in, d_mod
         self.act = nn.ReLU()
-        self.dropout_p = 0.0
+        self.dropout_p = 0.1
+
+        self.embedding = nn.Sequential(
+            MultiHeadWrapper(d_mod=self.d_in, n_heads=7),
+            self.act,
+            nn.LayerNorm(normalized_shape=self.d_in),
+            InitializedLinear(in_features=self.d_in, out_features=self.d_mod),
+            nn.Dropout(p=self.dropout_p),
+            self.act,
+            nn.LayerNorm(normalized_shape=self.d_mod)
+        )
 
         self.pred = nn.Sequential(
-            InitializedLinear(in_features=self.d_in, out_features=1),
+            InitializedLinear(in_features=self.d_mod, out_features=1),
         )
      
     def forward(self, in_list: list[torch.Tensor]) -> torch.Tensor:
         in_tensor = in_list[0]
-        out_tensor = self.pred(in_tensor)
-        print(out_tensor.shape)
+        out_tensor = self.embedding(in_tensor)
+        out_tensor = self.pred(out_tensor)
+        return out_tensor
+
+class HybridModel(nn.Module):
+    def __init__(self, d_in, d_mod):
+        super().__init__()
+        self.d_mod = d_mod
+        self.player_d_in, self.team_d_in = d_in[0], d_in[1]
+        self.act = nn.ReLU()
+        self.dropout_p = 0.0
+
+        self.team_embedding = nn.Sequential(
+            MultiHeadWrapper(d_mod=self.team_d_in, n_heads=7),
+            self.act,
+            nn.LayerNorm(normalized_shape=self.team_d_in),
+            InitializedLinear(in_features=self.team_d_in, out_features=self.d_mod),
+            nn.Dropout(p=self.dropout_p),
+            self.act,
+            nn.LayerNorm(normalized_shape=self.d_mod),
+        )
+
+        self.player_embedding = nn.Sequential(
+            MultiHeadWrapper(d_mod=self.player_d_in, n_heads=5),
+            self.act,
+            nn.LayerNorm(normalized_shape=self.player_d_in),
+            InitializedLinear(in_features=self.player_d_in, out_features=self.d_mod),
+            nn.Dropout(p=self.dropout_p),
+            self.act,
+            nn.LayerNorm(normalized_shape=self.d_mod),
+        )
+
+        self.player_home = nn.Sequential(
+            MeanFirstDim(),
+            InitializedLinear(in_features=self.d_mod, out_features=self.d_mod),
+            nn.Dropout(p=self.dropout_p),
+            self.act,
+            nn.LayerNorm(normalized_shape=self.d_mod)
+        )
+
+        self.player_away = nn.Sequential(
+            MeanFirstDim(),
+            InitializedLinear(in_features=self.d_mod, out_features=self.d_mod),
+            nn.Dropout(p=self.dropout_p),
+            self.act,
+            nn.LayerNorm(normalized_shape=self.d_mod)
+        )
+
+        self.hybrid_body = nn.Sequential(
+            InitializedLinear(in_features=self.d_mod*2, out_features=self.d_mod),
+            nn.Dropout(p=self.dropout_p),
+            self.act,
+            nn.LayerNorm(normalized_shape=self.d_mod)
+        )
+
+        self.pred = nn.Sequential(
+            InitializedLinear(in_features=self.d_mod, out_features=1),
+        )
+     
+    def forward(self, in_list: list[torch.Tensor]) -> torch.Tensor:
+        player_tensor, team_tensor = in_list[0], in_list[1]
+        team_tensor = self.team_embedding(team_tensor)
+        player_tensor = self.player_embedding(player_tensor)
+        home_players_tensor, away_players_tensor = home_away_tensors(in_tensor=player_tensor, original_tensor=player_tensor)
+        home_players_tensor, away_players_tensor = self.player_home(home_players_tensor), self.player_away(away_players_tensor)
+        players_tensor = torch.cat((home_players_tensor, away_players_tensor), dim=1)
+        out_tensor = torch.cat((team_tensor, players_tensor), dim=2)
+        out_tensor = self.hybrid_body(out_tensor)
+        out_tensor = self.pred(out_tensor)
         return out_tensor

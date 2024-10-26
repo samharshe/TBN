@@ -61,7 +61,7 @@ def train_test(model: nn.Module, optimizer: optim.Optimizer, loss_fn: Callable, 
     finally:
         wandb.finish()
 
-def test_player_score(model: nn.Module, loss_fn: Callable,  test_dataloader: torch_data.DataLoader) -> None:
+def test_player_score(model: nn.Module, loss_fn: Callable, test_dataloader: torch_data.DataLoader) -> None:
     """tests model that predicts player scores.
 
     parameters
@@ -116,7 +116,7 @@ def test_player_score(model: nn.Module, loss_fn: Callable,  test_dataloader: tor
     # log to wandb
     wandb.log({"test_mean_loss": test_mean_loss, "test_accuracy": test_accuracy})
 
-def test_classifier(model: nn.Module, loss_fn: Callable,  test_dataloader: torch_data.DataLoader) -> None:
+def test_classifier(model: nn.Module, loss_fn: Callable, test_dataloader: torch_data.DataLoader) -> None:
     """tests model that predicts binary outcomes.
 
     parameters
@@ -176,15 +176,15 @@ def test_score(model: nn.Module, loss_fn: Callable, test_dataloader: torch_data.
         # predictions from the model
         y_hat = model(x)
         
-        # predicted scores unnormalized given the normalization tensors [175., 176.]
-        normalization_tensor = torch.tensor([175., 176.])
-        unnormalized_y_hat = y_hat * normalization_tensor
-        unnormalized_y = y * normalization_tensor
-        home_win_pred = unnormalized_y_hat[:, 0, 0] > unnormalized_y_hat[:, 1, 0]
-        home_win_actual = unnormalized_y[:, 0, 0] > unnormalized_y[:, 1, 0]
+        # predictions
+        home_win_pred = y_hat[:, 0, 0] > y_hat[:, 1, 0]
+        home_win_actual = y[:, 0, 0] > y[:, 1, 0]
         
-        # keep track of 
-        n_correct += torch.sum(home_win_pred == home_win_actual).item()
+        # find correct predictions
+        correct = home_win_pred == home_win_actual
+        n_correct_batch = torch.sum(correct).item()
+        # keep track of correct predictions
+        n_correct += n_correct_batch
         n_total += len(y)
         
         # loss using passed loss function
@@ -201,8 +201,8 @@ def test_score(model: nn.Module, loss_fn: Callable, test_dataloader: torch_data.
     print(f'TEST MEAN LOSS: {test_mean_loss:04f}')
     print(f'TEST ACCURACY: {test_accuracy:04f}')
     
-    # Log to wandb
-    # wandb.log({"test_mean_loss": test_mean_loss, "test_accuracy": test_accuracy})
+    # log to wandb
+    wandb.log({"test_mean_loss": test_mean_loss, "test_accuracy": test_accuracy})
 
 def train(model: nn.Module, optimizer: optim.Optimizer, scheduler: lr_scheduler.LRScheduler, loss_fn: Callable, train_dataloader: torch_data.DataLoader, val_dataloader: torch_data.DataLoader, n_epochs: int, name: str) -> None:
     """trains model on dataloader, saves weights of the best-performing model, and logs ongoing results through wandb.
@@ -340,7 +340,6 @@ def check_memory(model: nn.Module, dataloader: torch_data.DataLoader, optimizer:
         x, y = next(iter(dataloader))
         x = [x_i[0:batch_size] for x_i in x]
         y = y[0:batch_size]
-        print(y.shape)
     except ValueError:
         raise ValueError(f'batch_size passed into this function must be an integer less than or equal to the batch size of the dataloader passed into this function. batch_size passed into this function: {batch_size}. batch size of dataloader passed into this function: {next(iter(dataloader))[0].shape[0]}.')
 
