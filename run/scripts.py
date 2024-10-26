@@ -322,7 +322,7 @@ def train(model: nn.Module, optimizer: optim.Optimizer, scheduler: lr_scheduler.
     plt.show()
     
 def check_memory(model: nn.Module, dataloader: torch_data.DataLoader, optimizer: optim.Optimizer = optim.SGD, loss_fn: Callable = nn.MSELoss, n_epochs: int = 100, batch_size: int = 4, lr: float = 1e-3) -> None:
-    """checks memory usage of model.
+    """makes sure model can memorize a single mini batch.
     
     parameters
     ----------
@@ -338,8 +338,9 @@ def check_memory(model: nn.Module, dataloader: torch_data.DataLoader, optimizer:
     try:
         # make single mini batch
         x, y = next(iter(dataloader))
-        x = x[0:batch_size]
+        x = [x_i[0:batch_size] for x_i in x]
         y = y[0:batch_size]
+        print(y.shape)
     except ValueError:
         raise ValueError(f'batch_size passed into this function must be an integer less than or equal to the batch size of the dataloader passed into this function. batch_size passed into this function: {batch_size}. batch size of dataloader passed into this function: {next(iter(dataloader))[0].shape[0]}.')
 

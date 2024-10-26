@@ -189,3 +189,20 @@ class PlayerScoreModel(nn.Module):
         out_tensor = self.body(out_tensor) + out_tensor
         out_tensor = self.pred(out_tensor)
         return out_tensor
+
+class TeamScoreModel(nn.Module):
+    def __init__(self, d_in, d_mod):
+        super().__init__()
+        self.d_in, self.d_mod = d_in, d_mod
+        self.act = nn.ReLU()
+        self.dropout_p = 0.0
+
+        self.pred = nn.Sequential(
+            InitializedLinear(in_features=self.d_in, out_features=1),
+        )
+     
+    def forward(self, in_list: list[torch.Tensor]) -> torch.Tensor:
+        in_tensor = in_list[0]
+        out_tensor = self.pred(in_tensor)
+        print(out_tensor.shape)
+        return out_tensor

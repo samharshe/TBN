@@ -253,17 +253,36 @@ def normalize_dataset(dataset: List[Tuple[List[torch.Tensor], torch.Tensor]]) ->
 
     return normalized_dataset
 
-def engineer_dataset(dataset):
-    index_to_feature_dim_map = {0: 6, 1: 4, 2: 4, 3: 1, 4: 2, 5: 2, 7: 2, 8: 2, 10: 2, 11: 2, 13: 2, 14: 1, 15: 3, 16: 4, 17: 2, 18: 2, 19: 2, 21: 6, 22: 4, 23: 2, 24: 1, 25: 1, 36: 2, 37: 3, 38: 2, 39: 1}
+def get_player_idx(dataset):
+    x, _ = dataset[0]
+    for i in range(len(x)):
+        if x[i].shape[0] > 2:
+            return i
+    
+def get_team_idx(dataset):
+    x, _ = dataset[0]
+    for i in range(len(x)):
+        if x[i].shape[0] == 2:
+            return i
+
+def engineer_dataset(dataset: List[Tuple[List[torch.Tensor], torch.Tensor]], team_or_player: str) -> List[Tuple[List[torch.Tensor], torch.Tensor]]:
+    if team_or_player == 'player':
+        list_position = get_player_idx(dataset)
+        index_to_feature_dim_map = {0: 6, 1: 4, 2: 4, 3: 1, 4: 2, 5: 2, 7: 2, 8: 2, 10: 2, 11: 2, 13: 2, 14: 1, 15: 3, 16: 4, 17: 2, 18: 2, 19: 2, 21: 6, 22: 4, 23: 2, 24: 1, 25: 1, 36: 2, 37: 3, 38: 2, 39: 1}
+    elif team_or_player == 'team':
+        list_position = get_team_idx(dataset)
+        index_to_feature_dim_map = {0: 3, 1: 1, 2: 1, 3: 1, 6: 3, 7: 1, 9: 2, 10: 2, 11: 2, 12: 3, 13: 4, 15: 2, 16: 3, 17: 3, 18: 2, 20: 6, 21: 1, 22: 1, 23: 1, 24: 1, 32: 2, 33: 4}
+    else:
+        raise ValueError(f'team_or_player must be either "player" or "team", not {team_or_player}.')
     engineered_list = []
     for x, y in dataset:
-        x_to_engineer = x[0]
+        x_to_engineer = x[list_position]
         features_list = []
         for idx, feature_dim in index_to_feature_dim_map.items():
             expanded_feature = model.gaussian_expansion(x_to_engineer[:,idx].unsqueeze(dim=1), min=0, max=1, out_features=feature_dim)
             features_list.append(expanded_feature)
         new_features = torch.cat(features_list, dim=1)
-        engineered_list.append(([new_features]+x[1:], y))
+        engineered_list.append((x[:list_position]+[new_features]+x[list_position+1:], y))
     
     return engineered_list
 
@@ -293,7 +312,7 @@ def simplify_dataset(dataset: List[Tuple[torch.Tensor, torch.Tensor]]) -> List[T
     
     return simplified_list
 
-def dataloaders(name: str, x_version: str, y_version: str, train_split: float=0.8,  val_split: float=0.1, test_split: float=0.1, batch_size: int=32, simple: bool=False, engineered: bool=False) -> Tuple[torch_data.DataLoader, torch_data.DataLoader, torch_data.DataLoader]:
+def dataloaders(name: str, x_version: str, y_version: str, train_split: float=0.8,  val_split: float=0.1, test_split: float=0.1, batch_size: int=32, simple: bool=False, engineered: str | bool=None) -> Tuple[torch_data.DataLoader, torch_data.DataLoader, torch_data.DataLoader]:
     """
 
     TARGETS FOR TEAM: batch x 2 x n_targets
@@ -314,7 +333,7 @@ def dataloaders(name: str, x_version: str, y_version: str, train_split: float=0.
     if simple:
         dataset_spec += '_simple'
     elif engineered:
-        dataset_spec += '_engineered'
+        dataset_spec += f'_engineered-{engineered}'
     
     # make full path to dataloaders given spec string
     dataloaders_path = f'data/dataloader/{dataset_spec}.pt'
@@ -333,9 +352,9 @@ def dataloaders(name: str, x_version: str, y_version: str, train_split: float=0.
     dataset = shape_dataset(dataset)
     dataset = normalize_dataset(dataset)
     if simple:
-        dataset = simplify_dataset(dataset)
+        dataset = simplify_dataset(dataset=dataset)
     elif engineered:
-        dataset = engineer_dataset(dataset)
+        dataset = engineer_dataset(dataset=dataset, team_or_player=engineered)
 
     total_size = len(dataset)
     indices = list(range(total_size))
