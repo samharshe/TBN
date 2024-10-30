@@ -1,8 +1,7 @@
 import numpy as np
 import pandas as pd
-from IPython.display import display
 
-STATS_TO_ADJUST = ['PTS', 'PACE', 'FGM', 'FGA', '3PT_FGM', '3PT_FGA', 'FTM', 'FTA', 'ORB', 'DRB', 'TRB', 'AST', 'STL', 'BLK', 'TOV', 'PF', '3PAR', 'FTR', 'ORTG', 'DRTG', '2PT_FGM', '2PT_FGA']
+STATS_TO_ADJUST = ['PTS', 'PACE', 'FGM', 'FGA', '3PT_FGM', '3PT_FGA', 'FTM', 'FTA', 'ORB', 'DRB', 'TRB', 'AST', 'STL', 'BLK', 'TOV', 'PF', 'ORTG', 'DRTG', '2PT_FGM', '2PT_FGA']
 
 class BaseModel:
     """base class similar to torch.nn.Module but for Bayesian models"""
@@ -119,7 +118,7 @@ class HomeAdjustment(BaseModel):
 
             def forward_row(row):
                 home_advantage = diff_df[diff_df['TEAM'] == row['TEAM']][STATS_TO_ADJUST].iloc[0]
-                adjustment = (float(row['IS_HOME']) - 0.5) * home_advantage
+                adjustment = 2 * (float(row['IS_HOME']) - 0.5) * home_advantage
                 adjusted_game = row[STATS_TO_ADJUST] - adjustment
                 for stat in STATS_TO_ADJUST:
                     row[stat] = adjusted_game[stat]
@@ -139,7 +138,7 @@ class HomeAdjustment(BaseModel):
             team = row['TEAM']
             diff_df = home_advantages[season]
             home_advantage = diff_df[diff_df['TEAM'] == team][STATS_TO_ADJUST].iloc[0]
-            adjustment = (float(row['IS_HOME']) - 0.5) * home_advantage
+            adjustment = 2 * (float(row['IS_HOME']) - 0.5) * home_advantage
             adjusted_game = row[STATS_TO_ADJUST] + adjustment
             for stat in STATS_TO_ADJUST:
                 row[stat] = adjusted_game[stat]
@@ -163,16 +162,17 @@ class RestAdjustment(BaseModel):
             season_df = new_df[new_df['SEASON'] == season]
 
             for rest in new_df['REST'].unique():
+                print(f'calculating rest adjustment for {rest}')
                 rest_df = season_df[season_df['REST'] == rest][['TEAM'] + STATS_TO_ADJUST].groupby('TEAM').mean()
-                mean_df = season_df[season_df['REST'] != rest][['TEAM'] + STATS_TO_ADJUST].groupby('TEAM').mean()
+                mean_df = season_df[['TEAM'] + STATS_TO_ADJUST].groupby('TEAM').mean()
 
                 diff_df = (rest_df[STATS_TO_ADJUST] - mean_df[STATS_TO_ADJUST]).reset_index() # diff_df gives improvement relative to mean for a given rest value
                 diff_df = epd_shrinkage(df=diff_df, cols=STATS_TO_ADJUST, p=0.01) # shrunken toward the league mean
-                self.rest_adjustments[season][rest] = diff_df
 
+                self.rest_adjustments[season][rest] = diff_df
                 def forward_row(row):
                     for stat in STATS_TO_ADJUST:
-                        row[stat] = row[stat] - (0.333 * diff_df[diff_df['TEAM'] == row['TEAM']][stat].iloc[0])
+                        row[stat] = row[stat] - diff_df[diff_df['TEAM'] == row['TEAM']][stat].iloc[0]
                     return row
                 
                 row_mask = season_df['REST'] == rest
@@ -190,7 +190,7 @@ class RestAdjustment(BaseModel):
             diff_df = rest_adjustments[row['SEASON']][row['REST']]
 
             for stat in STATS_TO_ADJUST:
-                row[stat] = row[stat] + (0.333 * diff_df[diff_df['TEAM'] == row['TEAM']][stat].iloc[0])
+                row[stat] = row[stat] + diff_df[diff_df['TEAM'] == row['TEAM']][stat].iloc[0]
 
             return row
 
