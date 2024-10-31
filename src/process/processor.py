@@ -6,46 +6,29 @@ STATS_TO_ADJUST = ['PTS', 'PACE', 'FGM', 'FGA', '3PT_FGM', '3PT_FGA', 'FTM', 'FT
 class BaseModel:
     """base class similar to torch.nn.Module but for Bayesian models"""
     def __init__(self):
-        self._models = {}
-        self._traces = {}
-        self._children = {}
-    
-    def register_model(self, name, model):
-        self._models[name] = model
-        
-    def register_child(self, name, module):
-        self._children[name] = module
-    
-    def state_dict(self):
-        return {
-            'models': self._models,
-            'traces': self._traces,
-            'children': {name: child.state_dict() 
-                        for name, child in self._children.items()}
-        }
-    
-    def load_state_dict(self, state_dict):
-        self._models = state_dict['models']
-        self._traces = state_dict['traces']
-        for name, child_state in state_dict['children'].items():
-            self._children[name].load_state_dict(child_state)
+        self.models = [
+            FitSeasonalSlopes(),
+            HomeAdjustment(),
+            RestAdjustment(),
+            OpponentAdjustment(),
+        ]
 
     def forward(self, df):
         new_df = df.copy()
-        for child in self._children:
-            new_df = child.forward(new_df)
+        for model in self.models:
+            new_df = model.forward(new_df)
         
         return new_df
 
-    def backward(self, full_df):
-        new_full_df = full_df.copy()
-        for child in self._children[::-1]:
-            new_full_df = child.backward(new_full_df)
+    def backward(self, df):
+        new_df = df.copy()
+        for model in self.models[::-1]:
+            new_df = model.backward(new_df)
+        
+        return new_df
 
-        new_full_df = new_full_df.round(5)
-        return new_full_df
 
-class FitSeasonalSlopes(BaseModel):
+class FitSeasonalSlopes():
     def __init__(self):
         super().__init__()
         self.ms = None
@@ -80,6 +63,8 @@ class FitSeasonalSlopes(BaseModel):
         return new_df
 
     def backward(self, full_df):
+        print('applying seasonal slopes backward')
+
         ms = self.ms
         new_full_df = full_df.copy()
 
@@ -98,7 +83,7 @@ class FitSeasonalSlopes(BaseModel):
         new_full_df = new_full_df.round(5)
         return new_full_df
 
-class HomeAdjustment(BaseModel):
+class HomeAdjustment():
     def __init__(self):
         super().__init__()
         self.home_advantages = {}
@@ -130,6 +115,8 @@ class HomeAdjustment(BaseModel):
         return new_df
      
     def backward(self, df):
+        print('applying home adjustment backward')
+
         new_df = df.copy()
         home_advantages = self.home_advantages
 
@@ -148,7 +135,7 @@ class HomeAdjustment(BaseModel):
 
         return new_df
 
-class RestAdjustment(BaseModel):
+class RestAdjustment():
     def __init__(self):
         super().__init__()
         self.rest_adjustments = {}
@@ -183,6 +170,8 @@ class RestAdjustment(BaseModel):
         return new_df
     
     def backward(self, df):
+        print('applying rest adjustment backward')
+
         new_df = df.copy()
         rest_adjustments = self.rest_adjustments
 
@@ -198,7 +187,7 @@ class RestAdjustment(BaseModel):
 
         return new_df
 
-class OpponentAdjustment(BaseModel):
+class OpponentAdjustment():
     def __init__(self):
         super().__init__()
         self.opponent_effects = {}
@@ -256,6 +245,8 @@ class OpponentAdjustment(BaseModel):
         return new_df
     
     def backward(self, df):
+        print('applying opponent adjustment backward')
+
         new_df = df.copy()
         opponent_effects = self.opponent_effects
 
@@ -302,5 +293,53 @@ def epd_shrinkage(df, cols, p=0.5):
     
     return new_df
 
-def make_mean_df(df):
-    return df[STATS_TO_ADJUST].groupby(['SEASON', 'TEAM']).mean()
+def make_mean_filled_df(df):
+    new_df = df.copy()
+    mean_df = df.groupby(['SEASON', 'TEAM'])[STATS_TO_ADJUST].mean()
+
+    def fill_mean(row):
+        for col in STATS_TO_ADJUST:
+            row[col] = mean_df.loc[(row['SEASON'], row['TEAM']), col]
+        return row
+    
+    new_df = new_df.apply(fill_mean, axis=1)
+    
+    return new_df
+
+def make_training_df(processed_df, original_df):
+    new_df = processed_df.copy()
+
+    def add_y(row):
+        y = original_df[(original_df['DATE'] == row['DATE']) & (original_df['TEAM'] == row['TEAM'])]['PTS'].values[0]
+        row['Y'] = y
+        return row
+    
+    new_df = new_df.apply(add_y, axis=1)
+
+    halved_df = pd.DataFrame()
+    row_list = []
+
+    for i in range(0, len(new_df), 2):
+        home_row = new_df.iloc[i]
+        away_row = new_df.iloc[i+1]
+
+        season = home_row['SEASON']
+        date = home_row['DATE']
+
+        cols_to_exclude = ['SEASON', 'DATE', 'OPPONENT', 'IS_HOME']
+        home_row = home_row[home_row.index.difference(cols_to_exclude)]
+        away_row = away_row[away_row.index.difference(cols_to_exclude)]
+
+        home_row.index = [f'HOME_{col}' for col in home_row.index]
+        away_row.index = [f'AWAY_{col}' for col in away_row.index]
+
+        combined_row = pd.Series()
+        combined_row['SEASON'] = season
+        combined_row['DATE'] = date
+        combined_row['HOME_WIN'] = home_row['HOME_Y'] > away_row['AWAY_Y']
+        combined_row = pd.concat([combined_row, home_row, away_row])
+        row_list.append(combined_row)
+        
+    halved_df = pd.concat(row_list, axis=1).T
+
+    return halved_df
